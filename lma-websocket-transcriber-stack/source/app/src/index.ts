@@ -43,6 +43,8 @@ import {
 import { jwtVerifier } from './utils/jwt-verifier';
 import { getPipelineLogger, closePipelineLogger } from './utils/pipeline-debug-logger';
 import { registerPipelineLogRoutes } from './routes/pipeline-log';
+import { startEdgeFunctionScheduler, stopEdgeFunctionScheduler } from './utils/edge-function-scheduler';
+import { startPipelineLogPoller, stopPipelineLogPoller } from './utils/pipeline-log-poller';
 
 const CPU_HEALTH_THRESHOLD = parseInt(
     process.env['CPU_HEALTH_THRESHOLD'] || '50',
@@ -669,5 +671,32 @@ server.listen(
             '[WS SERVER STARTUP]: Websocket server is ready and listening.'
         );
         server.log.info(`[[WS SERVER STARTUP]]: Routes: \n${server.printRoutes()}`);
+        
+        // Start Edge Function scheduler (triggers process-transcripts every 5s)
+        startEdgeFunctionScheduler();
+        
+        // Start Pipeline Log Poller (polls pipeline_logs table every 2s)
+        startPipelineLogPoller();
     }
 );
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    server.log.info('[SHUTDOWN]: SIGTERM received, shutting down gracefully');
+    stopEdgeFunctionScheduler();
+    stopPipelineLogPoller();
+    server.close(() => {
+        server.log.info('[SHUTDOWN]: Server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    server.log.info('[SHUTDOWN]: SIGINT received, shutting down gracefully');
+    stopEdgeFunctionScheduler();
+    stopPipelineLogPoller();
+    server.close(() => {
+        server.log.info('[SHUTDOWN]: Server closed');
+        process.exit(0);
+    });
+});

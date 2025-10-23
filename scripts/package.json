@@ -12,7 +12,8 @@
     "@aws-sdk/client-dynamodb": "^3.637.0",
     "@aws-sdk/client-s3": "^3.637.0",
     "@aws-sdk/util-dynamodb": "^3.637.0",
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^17.2.3"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
@@ -20,4 +21,3 @@
     "typescript": "^5.3.3"
   }
 }
-

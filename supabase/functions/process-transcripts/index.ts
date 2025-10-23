@@ -26,8 +26,41 @@ async function logTranscriptDebug(
     }
 }
 
+/**
+ * Send pipeline log to backend server
+ * This integrates Edge Function logs into the unified pipeline debug log
+ */
+async function sendPipelineLog(
+    supabase: any,
+    callId: string,
+    ownerEmail: string,
+    stage: '4️⃣ EDGE_POLL_START' | '4️⃣ EDGE_PROCESSING' | '4️⃣ EDGE_COMPLETE' | '4️⃣ EDGE_ERROR' | '5️⃣ REALTIME_BROADCAST',
+    metadata?: Record<string, any>,
+    error?: string,
+    duration?: number
+): Promise<void> {
+    try {
+        await supabase
+            .from('pipeline_logs')
+            .insert({
+                call_id: callId,
+                stage,
+                metadata,
+                error,
+                duration,
+                owner_email: ownerEmail,
+            });
+    } catch (err) {
+        console.error(`Failed to write pipeline log: ${err}`);
+    }
+}
+
 serve(async (req) => {
+    const startTime = Date.now();
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Get unique meeting IDs for logging
+    let meetingIds: string[] = [];
 
     const { data: events, error: fetchError } = await supabase
         .from('transcript_events')
@@ -43,6 +76,35 @@ serve(async (req) => {
 
     if (!events || events.length === 0) {
         return new Response(JSON.stringify({ processed: 0 }), { status: 200 });
+    }
+
+    meetingIds = [...new Set(events.map(e => e.meeting_id))] as string[];
+    
+    const { data: meetingsData } = await supabase
+        .from('meetings')
+        .select('meeting_id, owner_email')
+        .in('meeting_id', meetingIds);
+    
+    const meetingOwnerMap = new Map<string, string>();
+    if (meetingsData) {
+        for (const meeting of meetingsData) {
+            meetingOwnerMap.set(meeting.meeting_id, meeting.owner_email);
+        }
+    }
+    
+    for (const meetingId of meetingIds) {
+        const ownerEmail = meetingOwnerMap.get(meetingId) || 'system@unknown';
+        await sendPipelineLog(supabase, meetingId, ownerEmail, '4️⃣ EDGE_POLL_START', {
+            eventCount: events.filter(e => e.meeting_id === meetingId).length,
+            totalUnprocessed: events.length,
+        });
+    }
+    
+    for (const meetingId of meetingIds) {
+        const ownerEmail = meetingOwnerMap.get(meetingId) || 'system@unknown';
+        await sendPipelineLog(supabase, meetingId, ownerEmail, '4️⃣ EDGE_PROCESSING', {
+            eventCount: events.filter(e => e.meeting_id === meetingId).length,
+        });
     }
 
     await logTranscriptDebug('ALL_MEETINGS', '6-FETCHED_TRANSCRIPT_EVENTS', {
@@ -92,6 +154,16 @@ serve(async (req) => {
             inserted_count: processedEvents.length,
             inserted_at: new Date().toISOString(),
         });
+        
+        for (const meetingId of meetingIds) {
+            const ownerEmail = meetingOwnerMap.get(meetingId) || 'system@unknown';
+            const meetingEventCount = processedEvents.filter(e => e.meeting_id === meetingId).length;
+            await sendPipelineLog(supabase, meetingId, ownerEmail, '5️⃣ REALTIME_BROADCAST', {
+                broadcastCount: meetingEventCount,
+                channel: `transcripts:${meetingId}`,
+                event: 'INSERT',
+            });
+        }
     }
 
     if (!insertError || insertError.code === '23505') {
@@ -106,6 +178,16 @@ serve(async (req) => {
         await logTranscriptDebug('ALL_MEETINGS', '9-MARKED_AS_PROCESSED', {
             marked_count: events.length,
         });
+    }
+
+    const duration = Date.now() - startTime;
+    for (const meetingId of meetingIds) {
+        const ownerEmail = meetingOwnerMap.get(meetingId) || 'system@unknown';
+        const meetingEventCount = events.filter(e => e.meeting_id === meetingId).length;
+        await sendPipelineLog(supabase, meetingId, ownerEmail, '4️⃣ EDGE_COMPLETE', {
+            processedCount: meetingEventCount,
+            totalProcessed: events.length,
+        }, undefined, duration);
     }
 
     return new Response(

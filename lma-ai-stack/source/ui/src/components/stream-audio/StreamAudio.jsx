@@ -33,7 +33,6 @@ const StreamAudio = () => {
   const { user } = useAppContext();
   const { settings } = useSettingsContext();
 
-  // Get JWT token from Supabase user session
   const JWT_TOKEN =
     user?.signInUserSession?.accessToken?.jwtToken || localStorage.getItem('supabase-client-accesstokenjwt') || '';
   const ID_TOKEN =

@@ -162,8 +162,40 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
     };
   }, []);
 
+  // Send ACK to backend when UI receives transcript (for pipeline debugging)
+  const sendTranscriptACK = async (callId, transcriptSegment) => {
+    try {
+      const backendUrl = process.env.REACT_APP_WS_SERVER_URL || 'ws://localhost:8080/api/v1/ws';
+      const httpUrl = backendUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/api/v1/ws', '');
+      
+      await fetch(`${httpUrl}/api/v1/pipeline-log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callId,
+          stage: '6️⃣ UI_RECEIVED',
+          speaker: transcriptSegment.speaker || 'Unknown',
+          transcript: transcriptSegment.transcript || '',
+          metadata: {
+            segmentId: transcriptSegment.segmentId,
+            isPartial: transcriptSegment.isPartial,
+            channel: transcriptSegment.channel,
+            receivedAt: new Date().toISOString(),
+          }
+        })
+      });
+      logger.debug('✅ Sent transcript ACK to backend:', transcriptSegment.segmentId);
+    } catch (error) {
+      // Silent fail - không ảnh hưởng đến UI
+      logger.debug('⚠️  Failed to send transcript ACK:', error.message);
+    }
+  };
+
   const handleCallTranscriptSegmentMessage = (transcriptSegment) => {
     const { callId, transcript, isPartial, channel } = transcriptSegment;
+
+    // 🚀 GỬI ACK VỀ BACKEND (Stage 6)
+    sendTranscriptACK(callId, transcriptSegment);
 
     setCallTranscriptPerCallId((current) => {
       logger.debug('setCallTrancriptPerCallId current: ', current);
