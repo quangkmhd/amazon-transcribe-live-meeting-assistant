@@ -523,7 +523,7 @@ const VirtualParticipantList = () => {
               virtualParticipantId,
               accessToken: user.signInUserSession.accessToken.jwtToken,
               idToken: user.signInUserSession.idToken.jwtToken,
-              rereshToken: user.signInUserSession.refreshToken.token,
+              refreshToken: user.signInUserSession.refreshToken.jwtToken,
             },
           }),
         };

@@ -739,7 +739,15 @@ const CallInProgressTranscript = ({
 
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
-  }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag, speakerIdentities]);
+  }, [
+    callTranscriptPerCallId,
+    item.recordingStatusLabel,
+    targetLanguage,
+    agentTranscript,
+    translateOn,
+    updateFlag,
+    speakerIdentities,
+  ]);
 
   useEffect(() => {
     // prettier-ignore

@@ -5,12 +5,9 @@
  */
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { createClient } from '@supabase/supabase-js';
-import supabaseConfig from '../supabase-config';
+import supabase from '../utils/supabase-client';
 import { LOGIN_PATH } from './constants';
 import './Auth.css';
-
-const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
 
 const Register = () => {
   const [firstName, setFirstName] = useState('');

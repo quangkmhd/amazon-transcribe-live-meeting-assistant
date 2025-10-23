@@ -4,15 +4,11 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 
-import supabaseConfig from '../supabase-config';
+import supabase from '../utils/supabase-client';
 import useAppContext from '../contexts/app';
 
 import { CALL_LIST_SHARDS_PER_DAY } from '../components/call-list/calls-table-config';
-
-// Initialize Supabase client
-const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
 
 const logger = {
   debug: (...args) => console.log('[useCallsSupabaseApi]', ...args),

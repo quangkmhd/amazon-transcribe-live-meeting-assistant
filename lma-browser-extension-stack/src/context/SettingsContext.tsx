@@ -20,13 +20,20 @@ const SettingsContext = createContext(initialSettings);
 
 function SettingsProvider({ children }: any) {
   let settingsJson = {} ;
+  
+  // Determine the correct path for the config file
+  const configPath = chrome?.runtime ? chrome.runtime.getURL('lma_config.json') : 'lma_config.json';
+  
   const xhr = new XMLHttpRequest();
-  xhr.open('GET', 'lma_config.json', false);
+  xhr.open('GET', configPath, false);
   xhr.send();
 
   if (xhr.status === 200) {
     // Success!
     settingsJson = JSON.parse(xhr.responseText);
+    console.log('[SettingsContext] Config loaded successfully:', settingsJson);
+  } else {
+    console.error('[SettingsContext] Failed to load config from:', configPath, 'Status:', xhr.status);
   }
 
   const [settings, setSettings] = useState(settingsJson as Settings);

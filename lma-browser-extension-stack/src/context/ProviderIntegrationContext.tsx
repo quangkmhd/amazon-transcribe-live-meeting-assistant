@@ -56,6 +56,7 @@ function IntegrationProvider({ children }: any) {
   const [shouldConnect, setShouldConnect] = useState(false);
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [startEventSent, setStartEventSent] = useState(false);
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -255,6 +256,7 @@ function IntegrationProvider({ children }: any) {
       setShouldConnect(false);
       setIsTranscribing(false);
       setPaused(false);
+      setStartEventSent(false);
       sendStopMessage();
     }
   }, [readyState, shouldConnect, isTranscribing, paused, setIsTranscribing, getWebSocket, sendMessage, setPaused, sendStopMessage, sendRecordingMessage]);
@@ -273,8 +275,16 @@ function IntegrationProvider({ children }: any) {
           sendMessage(JSON.stringify(currentCall));
           setIsTranscribing(true);
           sendRecordingMessage();
+          
+          // Wait 500ms before allowing audio data forwarding to ensure START event is processed
+          setStartEventSent(false);
+          setTimeout(() => {
+            setStartEventSent(true);
+            console.log('START event processing delay complete, ready to forward audio data');
+          }, 500);
         } else if (request.action === "AudioData") {
-          if (readyState === ReadyState.OPEN) {
+          // Only forward audio data after START event has been sent and processed
+          if (readyState === ReadyState.OPEN && startEventSent) {
             const audioData = await dataUrlToBytes(request.audio, muted, paused);
             sendMessage(audioData);
           }

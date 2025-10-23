@@ -5,13 +5,37 @@
  */
 import { useState, useEffect } from 'react';
 
+// Create a Cognito-compatible session mock for AWS Amplify libraries
+const createCognitoCompatibleSession = () => {
+  // Get tokens from localStorage (set by useUserAuthStateSupabase)
+  const accessToken = localStorage.getItem('supabase-client-accesstokenjwt') || '';
+  const idToken = localStorage.getItem('supabase-client-idtokenjwt') || '';
+  const refreshToken = localStorage.getItem('supabase-client-refreshtoken') || '';
+
+  return {
+    getAccessToken: () => ({
+      getJwtToken: () => accessToken,
+      jwtToken: accessToken,
+    }),
+    getIdToken: () => ({
+      getJwtToken: () => idToken,
+      jwtToken: idToken,
+    }),
+    getRefreshToken: () => ({
+      getToken: () => refreshToken,
+      token: refreshToken,
+    }),
+    isValid: () => !!accessToken,
+  };
+};
+
 const useCurrentSessionCreds = ({ authState }) => {
-  const [currentSession, setCurrentSession] = useState({ dummy: true });
+  const [currentSession, setCurrentSession] = useState(null);
   const [currentCredentials, setCurrentCredentials] = useState({ dummy: true });
 
   useEffect(() => {
     if (authState === 'signedin') {
-      setCurrentSession({ dummy: true });
+      setCurrentSession(createCognitoCompatibleSession());
       setCurrentCredentials({ dummy: true });
     } else {
       setCurrentSession(null);

@@ -9,6 +9,22 @@ import './index.css';
 
 import App from './App';
 
+// Suppress XState warning from AWS Amplify UI library (third-party dependency)
+// The warning is about predictableActionArguments configuration in @aws-amplify/ui-react
+// This is a known issue with older versions of AWS Amplify UI components
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  if (
+    typeof args[0] === 'string' &&
+    args[0].includes('predictableActionArguments') &&
+    args[0].includes('createMachine')
+  ) {
+    // Suppress this specific warning from XState/AWS Amplify UI
+    return;
+  }
+  originalWarn.apply(console, args);
+};
+
 ReactDOM.render(
   <React.StrictMode>
     <App />

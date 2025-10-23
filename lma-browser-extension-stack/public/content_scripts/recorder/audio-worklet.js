@@ -18,19 +18,13 @@ class RecordingProcessor extends AudioWorkletProcessor {
   };
 
   decodeWebMToAudioBuffer (audioBuffer) {
-    const left32Bit = audioBuffer[0];
-    const right32Bit = audioBuffer[1];
-    const left16Bit = this.floatTo16BitPCM(left32Bit);
-    const right16Bit = this.floatTo16BitPCM(right32Bit);
-    const length = left16Bit.length + right16Bit.length;
-    const interleaved = new Int16Array(length);
-
-    for (let i = 0, j = 0; i < length; j += 1) {
-      interleaved[(i += 1)] = left16Bit[j];
-      interleaved[(i += 1)] = right16Bit[j];
+    // Handle mono input (1 channel)
+    const mono32Bit = audioBuffer[0];
+    if (!mono32Bit) {
+      return new Int16Array(0);
     }
-
-    return interleaved;
+    const mono16Bit = this.floatTo16BitPCM(mono32Bit);
+    return mono16Bit;
   };
 
 

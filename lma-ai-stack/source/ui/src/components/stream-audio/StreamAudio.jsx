@@ -30,9 +30,16 @@ let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
 
 const StreamAudio = () => {
-  const { currentSession, user } = useAppContext();
+  const { user } = useAppContext();
   const { settings } = useSettingsContext();
-  const JWT_TOKEN = currentSession.getAccessToken().getJwtToken();
+
+  // Get JWT token from Supabase user session
+  const JWT_TOKEN =
+    user?.signInUserSession?.accessToken?.jwtToken || localStorage.getItem('supabase-client-accesstokenjwt') || '';
+  const ID_TOKEN =
+    user?.signInUserSession?.idToken?.jwtToken || localStorage.getItem('supabase-client-idtokenjwt') || '';
+  const REFRESH_TOKEN =
+    user?.signInUserSession?.refreshToken?.jwtToken || localStorage.getItem('supabase-client-refreshtoken') || '';
 
   const userIdentifier = user?.attributes?.email || DEFAULT_LOCAL_SPEAKER_NAME;
 
@@ -78,8 +85,8 @@ const StreamAudio = () => {
   const { sendMessage } = useWebSocket(getSocketUrl, {
     queryParams: {
       authorization: `Bearer ${JWT_TOKEN}`,
-      id_token: `${currentSession.idToken.jwtToken}`,
-      refresh_token: `${currentSession.refreshToken.token}`,
+      id_token: ID_TOKEN,
+      refresh_token: REFRESH_TOKEN,
     },
     onOpen: (event) => {
       console.log(`
@@ -96,7 +103,14 @@ const StreamAudio = () => {
         DEBUG - [${new Date().toISOString()}]: Websocket onError Event: ${JSON.stringify(event)}
       `);
     },
-    shouldReconnect: () => true,
+    shouldReconnect: (closeEvent) => {
+      // Only reconnect if we have valid tokens and it's not a normal closure
+      const hasTokens = JWT_TOKEN && JWT_TOKEN !== '' && JWT_TOKEN !== 'undefined';
+      console.log(`DEBUG - shouldReconnect: hasTokens=${hasTokens}, closeCode=${closeEvent?.code}`);
+      return hasTokens && closeEvent?.code !== 1000;
+    },
+    // Don't connect until we have tokens
+    skip: !JWT_TOKEN || JWT_TOKEN === '' || JWT_TOKEN === 'undefined',
   });
 
   const handleCallIdChange = (e) => {
@@ -215,6 +229,19 @@ const StreamAudio = () => {
       console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`);
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
+
+      // Wait for server to process START event before sending audio data
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Waiting 500ms for server to process START event...
+      `);
+      await new Promise((resolve) => {
+        setTimeout(() => {
+          resolve();
+        }, 500);
+      });
+      console.log(`
+        DEBUG - [${new Date().toISOString()}]: Starting audio capture and streaming...
+      `);
 
       displayAudioSource.current = audioContext.current.createMediaStreamSource(displayStream.current);
       micAudioSource.current = audioContext.current.createMediaStreamSource(micStream.current);

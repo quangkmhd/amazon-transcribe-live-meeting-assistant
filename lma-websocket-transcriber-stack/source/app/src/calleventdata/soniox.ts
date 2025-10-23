@@ -11,9 +11,36 @@ import {
     upsertMeeting,
     getSpeakerName,
 } from '../supabase-client';
+import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 const SONIOX_API_KEY = process.env['SONIOX_API_KEY']!;
 const SONIOX_WS_URL = 'wss://stt-rt.soniox.com/transcribe-websocket';
+
+const DEBUG_LOG_DIR = process.env['DEBUG_LOG_DIR'] || './debug-logs';
+const ENABLE_TRANSCRIPT_DEBUG = process.env['ENABLE_TRANSCRIPT_DEBUG'] === 'true';
+
+function logTranscriptDebug(
+    meetingId: string,
+    stage: string,
+    data: any
+): void {
+    if (!ENABLE_TRANSCRIPT_DEBUG) return;
+
+    try {
+        if (!existsSync(DEBUG_LOG_DIR)) {
+            mkdirSync(DEBUG_LOG_DIR, { recursive: true });
+        }
+
+        const logFile = join(DEBUG_LOG_DIR, `transcript-${meetingId}.txt`);
+        const timestamp = new Date().toISOString();
+        const logEntry = `\n${'='.repeat(80)}\n[${timestamp}] STAGE: ${stage}\n${'-'.repeat(80)}\n${JSON.stringify(data, null, 2)}\n`;
+
+        appendFileSync(logFile, logEntry, 'utf-8');
+    } catch (error) {
+        console.error(`Failed to write debug log: ${error}`);
+    }
+}
 
 export const startSonioxTranscription = async (
     socketCallMap: SocketCallData,
@@ -67,14 +94,24 @@ export const startSonioxTranscription = async (
         try {
             const result = JSON.parse(data.toString());
 
+            logTranscriptDebug(callMetaData.callId, '1-SONIOX_RAW_RESPONSE', {
+                raw_result: result,
+                has_tokens: !!result.tokens,
+                token_count: result.tokens?.length || 0,
+            });
+
             if (result.tokens && result.tokens.length > 0) {
-                // Filter only final tokens
                 const finalTokens = result.tokens.filter(
                     (t: any) => t.is_final
                 );
 
+                logTranscriptDebug(callMetaData.callId, '2-FILTERED_TOKENS', {
+                    total_tokens: result.tokens.length,
+                    final_tokens: finalTokens.length,
+                    final_tokens_detail: finalTokens,
+                });
+
                 if (finalTokens.length > 0) {
-                    // Group by speaker
                     const speakerGroups: Record<string, any[]> = {};
 
                     finalTokens.forEach((token: any) => {
@@ -85,7 +122,12 @@ export const startSonioxTranscription = async (
                         speakerGroups[speakerNumber].push(token);
                     });
 
-                    // Save each speaker's segment
+                    logTranscriptDebug(callMetaData.callId, '3-SPEAKER_GROUPS', {
+                        speaker_count: Object.keys(speakerGroups).length,
+                        speakers: Object.keys(speakerGroups),
+                        speaker_groups: speakerGroups,
+                    });
+
                     for (const [speakerNumber, tokens] of Object.entries(
                         speakerGroups
                     )) {
@@ -95,7 +137,7 @@ export const startSonioxTranscription = async (
                                 speakerNumber
                             );
 
-                            await insertTranscriptEvent({
+                            const transcriptData = {
                                 meeting_id: callMetaData.callId,
                                 transcript: tokens
                                     .map((t: any) => t.text)
@@ -107,14 +149,46 @@ export const startSonioxTranscription = async (
                                 end_time:
                                     tokens[tokens.length - 1].end_ms,
                                 is_final: true,
-                            });
+                            };
+
+                            logTranscriptDebug(
+                                callMetaData.callId,
+                                '4-BEFORE_INSERT_TRANSCRIPT_EVENTS',
+                                {
+                                    speaker_number: speakerNumber,
+                                    speaker_name: speakerName,
+                                    transcript_data: transcriptData,
+                                }
+                            );
+
+                            await insertTranscriptEvent(transcriptData);
+
+                            logTranscriptDebug(
+                                callMetaData.callId,
+                                '5-AFTER_INSERT_TRANSCRIPT_EVENTS_SUCCESS',
+                                {
+                                    speaker_number: speakerNumber,
+                                    transcript: transcriptData.transcript,
+                                    inserted_at: new Date().toISOString(),
+                                }
+                            );
 
                             server.log.debug(
                                 `[SONIOX]: [${callMetaData.callId}] - Saved transcript for speaker ${speakerNumber}`
                             );
                         } catch (error: any) {
+                            logTranscriptDebug(
+                                callMetaData.callId,
+                                '5-AFTER_INSERT_TRANSCRIPT_EVENTS_ERROR',
+                                {
+                                    speaker_number: speakerNumber,
+                                    error_code: error.code,
+                                    error_message: error.message,
+                                    error_detail: error.detail,
+                                }
+                            );
+
                             if (error.code !== '23505') {
-                                // Ignore duplicates
                                 server.log.error(
                                     `[SONIOX]: [${callMetaData.callId}] - Error saving transcript: ${error}`
                                 );
@@ -124,6 +198,11 @@ export const startSonioxTranscription = async (
                 }
             }
         } catch (error) {
+            logTranscriptDebug(callMetaData.callId, 'ERROR_PROCESSING_MESSAGE', {
+                error: String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
+
             server.log.error(
                 `[SONIOX]: [${callMetaData.callId}] - Error processing message: ${error}`
             );

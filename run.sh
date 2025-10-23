@@ -1,6 +1,10 @@
 cd lma-websocket-transcriber-stack/source/app
 npm start
 
+cd lma-ai-stack/source/ui
+npm start
+
+
 cd lma-browser-extension-stack
 npm start
 

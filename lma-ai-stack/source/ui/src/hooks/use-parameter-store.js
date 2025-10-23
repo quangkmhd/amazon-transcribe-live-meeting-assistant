@@ -5,36 +5,40 @@
  */
 import { useState, useEffect } from 'react';
 
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
-// import { useState, useEffect } from 'react';
-import awsExports from '../aws-exports';
+// AWS SSM disabled - project migrated to Supabase
+// All settings should be managed via environment variables or Supabase config
 
-const LCA_PARAMETER_NAME = process.env.REACT_APP_SETTINGS_PARAMETER;
+const useParameterStore = () => {
+  const [settings] = useState({
+    // WebSocket endpoint for real-time transcription
+    WSEndpoint: process.env.REACT_APP_WS_SERVER_URL || 'ws://localhost:8080/api/v1/ws',
 
-const useParameterStore = (creds) => {
-  const [settings, setSettings] = useState({});
+    // Recording disclaimer message
+    recordingDisclaimer:
+      'By proceeding, you confirm that you have obtained consent from all participants to record this meeting. ' +
+      'This recording will be transcribed and may be stored for analysis purposes. ' +
+      'Do you agree to start recording?',
 
-  const refreshSettings = async (credentials) => {
-    let lcaSettings = {};
+    // Supabase configuration
+    supabaseUrl: process.env.REACT_APP_SUPABASE_URL,
+    supabaseAnonKey: process.env.REACT_APP_SUPABASE_ANON_KEY,
 
-    if (credentials) {
-      try {
-        const ssmClient = new SSMClient({ credentials, region: awsExports.aws_project_region });
-        const getParameterCmd = new GetParameterCommand({ Name: LCA_PARAMETER_NAME });
-        const response = await ssmClient.send(getParameterCmd);
-        if (response.Parameter?.Value) {
-          lcaSettings = JSON.parse(response.Parameter.Value);
-          console.log(response.Parameter.Value);
-        }
-      } catch (error) {
-        console.warn('[useParameterStore] AWS SSM not configured, skipping settings fetch:', error.message);
-      }
-    }
-    setSettings(lcaSettings);
-  };
+    // Feature flags
+    enableRealtime: process.env.REACT_APP_ENABLE_REALTIME === 'true',
+    enableMeetingSummaries: process.env.REACT_APP_ENABLE_MEETING_SUMMARIES === 'true',
+    enableSpeakerLabels: process.env.REACT_APP_ENABLE_SPEAKER_LABELS === 'true',
+    enableRecording: process.env.REACT_APP_ENABLE_RECORDING === 'true',
+    enableSpeakerDetection: process.env.REACT_APP_ENABLE_SPEAKER_DETECTION === 'true',
+  });
 
-  useEffect(async () => {
-    refreshSettings(creds);
+  useEffect(() => {
+    // AWS SSM parameter store disabled
+    // Settings now managed via environment variables
+    console.log('[useParameterStore] Loaded settings from environment variables:', {
+      WSEndpoint: settings.WSEndpoint,
+      enableRealtime: settings.enableRealtime,
+      enableRecording: settings.enableRecording,
+    });
   }, []);
 
   return settings;

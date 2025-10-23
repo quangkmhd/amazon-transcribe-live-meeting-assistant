@@ -27,5 +27,8 @@
   "homepage": "https://github.com/quangkmhd/amazon-transcribe-live-meeting-assistant#readme",
   "devDependencies": {
     "@playwright/test": "^1.56.1"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
   }
 }

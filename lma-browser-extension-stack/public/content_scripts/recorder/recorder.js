@@ -138,7 +138,14 @@ const startStreaming = async (sendResponse) => {
       console.log(`Add module error ${error}`);
     }
 
-    audioProcessor = new AudioWorkletNode(audioContext, 'recording-processor');
+    // Configure AudioWorkletNode for mono input (1 channel)
+    audioProcessor = new AudioWorkletNode(audioContext, 'recording-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      channelCount: 1,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'speakers'
+    });
     audioProcessor.port.onmessageerror = (error) => {
       console.log(`Error receving message from worklet ${error}`);
     };

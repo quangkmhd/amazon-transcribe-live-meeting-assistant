@@ -4,15 +4,12 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import supabaseConfig from '../supabase-config';
+import supabase from '../utils/supabase-client';
 
 const logger = {
   debug: (...args) => console.log('[useUserAuthStateSupabase]', ...args),
   error: (...args) => console.error('[useUserAuthStateSupabase]', ...args),
 };
-
-const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
 
 const useUserAuthStateSupabase = () => {
   const [authState, setAuthState] = useState();
