@@ -53,6 +53,8 @@ import {
 } from '../common/download-func';
 import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
+import { getSpeakerIdentities, setSpeakerName } from '../../utils/supabase-client';
+import SpeakerIdentificationModal from './SpeakerIdentificationModal';
 
 const logger = new Logger('CallPanel');
 
@@ -386,14 +388,13 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
+const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, onSpeakerClick, speakerIdentities }) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
     const categoryText = `${segment.transcript}`;
     const newSegment = segment;
     newSegment.transcript = categoryText;
-    // We will return a special version of the grid that's specifically only for category.
     return (
       <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
         {getSentimentImage(segment, enableSentimentAnalysis)}
@@ -408,11 +409,29 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
   let channelClass = '';
 
   if (channel === 'AGENT' || channel === 'CALLER') {
-    displayChannel = `${segment.speaker}`.trim();
+    const speakerNumber = segment.speaker_number || segment.speaker;
+    const cleanSpeakerNumber = typeof speakerNumber === 'string' ? speakerNumber.replace(/^spk_/, '') : speakerNumber;
+    const speakerIdentity = speakerIdentities?.[speakerNumber];
+
+    if (speakerIdentity?.name) {
+      displayChannel = `${speakerIdentity.name} (Speaker ${cleanSpeakerNumber})`;
+    } else if (segment.speaker_number) {
+      displayChannel = `Speaker ${cleanSpeakerNumber}`;
+    } else {
+      displayChannel = `${segment.speaker}`.trim();
+    }
   } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
     displayChannel = 'MEETING_ASSISTANT';
     channelClass = 'transcript-segment-agent-assist';
   }
+
+  const handleSpeakerClick = () => {
+    if ((channel === 'AGENT' || channel === 'CALLER') && segment.speaker_number) {
+      onSpeakerClick(segment.speaker_number, speakerIdentities?.[segment.speaker_number]?.name);
+    }
+  };
+
+  const isSpeakerClickable = (channel === 'AGENT' || channel === 'CALLER') && segment.speaker_number;
 
   return (
     <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
@@ -420,7 +439,27 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
           <TextContent>
-            <strong>{displayChannel}</strong>
+            {isSpeakerClickable ? (
+              <button
+                type="button"
+                style={{
+                  cursor: 'pointer',
+                  color: '#0972D3',
+                  textDecoration: 'underline',
+                  fontWeight: 'bold',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                }}
+                onClick={handleSpeakerClick}
+                title="Click to identify this speaker"
+              >
+                {displayChannel}
+              </button>
+            ) : (
+              <strong>{displayChannel}</strong>
+            )}
           </TextContent>
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
@@ -474,6 +513,8 @@ const CallInProgressTranscript = ({
   translateOn,
   collapseSentiment,
   enableSentimentAnalysis,
+  speakerIdentities,
+  onSpeakerClick,
 }) => {
   const bottomRef = useRef();
   const containerRef = useRef();
@@ -657,22 +698,26 @@ const CallInProgressTranscript = ({
       })
       .map(
         // prettier-ignore
-        (s) => (
-          s?.segmentId
-          && s?.createdAt
-          && (s.agentTranscript === undefined
-            || s.agentTranscript || s.channel !== 'AGENT')
-          && (s.channel !== 'AGENT_VOICETONE')
-          && (s.channel !== 'CALLER_VOICETONE')
-          && (s.channel !== 'CHAT_ASSISTANT')
-          && <TranscriptSegment
-            key={`${s.segmentId}-${s.createdAt}`}
-            segment={s}
-            translateCache={translateCache}
-            enableSentimentAnalysis={enableSentimentAnalysis}
-            participantName={item.callerPhoneNumber}
-          />
-        ),
+        (s) => {
+          return (
+            s?.segmentId
+            && s?.createdAt
+            && (s.agentTranscript === undefined
+              || s.agentTranscript || s.channel !== 'AGENT')
+            && (s.channel !== 'AGENT_VOICETONE')
+            && (s.channel !== 'CALLER_VOICETONE')
+            && (s.channel !== 'CHAT_ASSISTANT')
+            && <TranscriptSegment
+              key={`${s.segmentId}-${s.createdAt}`}
+              segment={s}
+              translateCache={translateCache}
+              enableSentimentAnalysis={enableSentimentAnalysis}
+              participantName={item.callerPhoneNumber}
+              onSpeakerClick={onSpeakerClick}
+              speakerIdentities={speakerIdentities}
+            />
+          );
+        },
       );
 
     // this element is used for scrolling to bottom and to provide padding
@@ -694,7 +739,7 @@ const CallInProgressTranscript = ({
 
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
-  }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag]);
+  }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag, speakerIdentities]);
 
   useEffect(() => {
     // prettier-ignore
@@ -814,6 +859,8 @@ const getTranscriptContent = ({
   translateOn,
   collapseSentiment,
   enableSentimentAnalysis,
+  speakerIdentities,
+  onSpeakerClick,
 }) => {
   switch (item.recordingStatusLabel) {
     case DONE_STATUS:
@@ -830,6 +877,8 @@ const getTranscriptContent = ({
           translateOn={translateOn}
           collapseSentiment={collapseSentiment}
           enableSentimentAnalysis={enableSentimentAnalysis}
+          speakerIdentities={speakerIdentities}
+          onSpeakerClick={onSpeakerClick}
         />
       );
   }
@@ -842,8 +891,9 @@ const CallTranscriptContainer = ({
   translateClient,
   collapseSentiment,
   enableSentimentAnalysis,
+  speakerIdentities,
+  onSpeakerClick,
 }) => {
-  // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
   const [autoScrollDisabled, setAutoScrollDisabled] = useState(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
   const [showDownloadTranscript, setShowDownloadTranscripts] = useState(item.recordingStatusLabel === DONE_STATUS);
@@ -964,6 +1014,8 @@ const CallTranscriptContainer = ({
           translateOn,
           collapseSentiment,
           enableSentimentAnalysis,
+          speakerIdentities,
+          onSpeakerClick,
         })}
       </Container>
       {getAgentAssistPanel(item, collapseSentiment)}
@@ -1106,20 +1158,49 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   const { settings } = useSettingsContext();
   const [collapseSentiment, setCollapseSentiment] = useState(false);
+  const [speakerIdentities, setSpeakerIdentities] = useState({});
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedSpeaker, setSelectedSpeaker] = useState({ number: null, name: null });
 
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
-  // prettier-ignore
-  const customRetryStrategy = new StandardRetryStrategy(
-    async () => MAXIMUM_ATTEMPTS,
-    {
-      delayDecider:
-        (_, attempts) => Math.floor(
-          Math.min(MAXIMUM_RETRY_DELAY, 2 ** attempts * 10),
-        ),
-    },
-  );
+  useEffect(() => {
+    const loadSpeakerIdentities = async () => {
+      try {
+        const identities = await getSpeakerIdentities(item.callId);
+        setSpeakerIdentities(identities);
+      } catch (error) {
+        logger.error('Failed to load speaker identities:', error);
+      }
+    };
+
+    if (item.callId) {
+      loadSpeakerIdentities();
+    }
+  }, [item.callId]);
+
+  const handleSpeakerClick = (speakerNumber, currentName) => {
+    setSelectedSpeaker({ number: speakerNumber, name: currentName });
+    setModalVisible(true);
+  };
+
+  const handleSaveSpeakerName = async (speakerNumber, speakerName) => {
+    try {
+      await setSpeakerName(item.callId, speakerNumber, speakerName);
+      setSpeakerIdentities((prev) => ({
+        ...prev,
+        [speakerNumber]: { name: speakerName },
+      }));
+    } catch (error) {
+      logger.error('Failed to save speaker name:', error);
+      throw error;
+    }
+  };
+
+  const customRetryStrategy = new StandardRetryStrategy(async () => MAXIMUM_ATTEMPTS, {
+    delayDecider: (_, attempts) => Math.floor(Math.min(MAXIMUM_RETRY_DELAY, 2 ** attempts * 10)),
+  });
 
   let translateClient = new TranslateClient({
     region: awsExports.aws_project_region,
@@ -1253,43 +1334,54 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   }, []);
 
   return (
-    <SpaceBetween size="s">
-      <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />
-      <CallSummary item={item} />
-      {(enableSentimentAnalysis || enableVoiceTone) && (
-        <Grid
-          gridDefinition={[
-            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 8 : 12 } },
-            { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 4 : 0 } },
-          ]}
-        >
-          {enableSentimentAnalysis && (
-            <CallStatsContainer
-              item={item}
-              callTranscriptPerCallId={callTranscriptPerCallId}
-              collapseSentiment={collapseSentiment}
-              setCollapseSentiment={setCollapseSentiment}
-            />
-          )}
-          {enableVoiceTone && (
-            <VoiceToneContainer
-              item={item}
-              callTranscriptPerCallId={callTranscriptPerCallId}
-              collapseSentiment={collapseSentiment}
-              setCollapseSentiment={setCollapseSentiment}
-            />
-          )}
-        </Grid>
-      )}
-      <CallTranscriptContainer
-        item={item}
-        setToolsOpen={setToolsOpen}
-        callTranscriptPerCallId={callTranscriptPerCallId}
-        translateClient={translateClient}
-        collapseSentiment={collapseSentiment}
-        enableSentimentAnalysis={enableSentimentAnalysis}
+    <>
+      <SpeakerIdentificationModal
+        visible={modalVisible}
+        onDismiss={() => setModalVisible(false)}
+        speakerNumber={selectedSpeaker.number}
+        currentName={selectedSpeaker.name}
+        onSave={handleSaveSpeakerName}
       />
-    </SpaceBetween>
+      <SpaceBetween size="s">
+        <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />
+        <CallSummary item={item} />
+        {(enableSentimentAnalysis || enableVoiceTone) && (
+          <Grid
+            gridDefinition={[
+              { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 8 : 12 } },
+              { colspan: { default: 12, xs: enableVoiceTone && enableSentimentAnalysis ? 4 : 0 } },
+            ]}
+          >
+            {enableSentimentAnalysis && (
+              <CallStatsContainer
+                item={item}
+                callTranscriptPerCallId={callTranscriptPerCallId}
+                collapseSentiment={collapseSentiment}
+                setCollapseSentiment={setCollapseSentiment}
+              />
+            )}
+            {enableVoiceTone && (
+              <VoiceToneContainer
+                item={item}
+                callTranscriptPerCallId={callTranscriptPerCallId}
+                collapseSentiment={collapseSentiment}
+                setCollapseSentiment={setCollapseSentiment}
+              />
+            )}
+          </Grid>
+        )}
+        <CallTranscriptContainer
+          item={item}
+          setToolsOpen={setToolsOpen}
+          callTranscriptPerCallId={callTranscriptPerCallId}
+          translateClient={translateClient}
+          collapseSentiment={collapseSentiment}
+          enableSentimentAnalysis={enableSentimentAnalysis}
+          speakerIdentities={speakerIdentities}
+          onSpeakerClick={handleSpeakerClick}
+        />
+      </SpaceBetween>
+    </>
   );
 };
 
