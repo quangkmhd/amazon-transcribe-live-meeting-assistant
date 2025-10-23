@@ -1,0 +1,87 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+import React from 'react';
+import PropTypes from 'prop-types';
+import { Logger } from 'aws-amplify';
+import { Redirect, Route, Switch } from 'react-router-dom';
+
+import { useAuthenticator } from '@aws-amplify/ui-react';
+
+import { SettingsContext } from '../contexts/settings';
+import useParameterStore from '../hooks/use-parameter-store';
+import useAppContext from '../contexts/app';
+
+import CallsRoutes from './CallsRoutes';
+import StreamAudioRoutes from './StreamAudioRoutes';
+import VirtualParticipantRoutes from './VirtualParticipantRoutes';
+import MeetingsQueryRoutes from './MeetingsQueryRoutes';
+
+import {
+  CALLS_PATH,
+  DEFAULT_PATH,
+  LOGIN_PATH,
+  LOGOUT_PATH,
+  STREAM_AUDIO_PATH,
+  VIRTUAL_PARTICIPANT_PATH,
+  MEETINGS_QUERY_PATH,
+} from './constants';
+
+const logger = new Logger('AuthRoutes');
+
+const SignOutComponent = () => {
+  const { signOut } = useAuthenticator((context) => [context.user]);
+
+  React.useEffect(() => {
+    signOut();
+  }, [signOut]);
+
+  return <div>Signing out...</div>;
+};
+
+const AuthRoutes = ({ redirectParam }) => {
+  const { currentCredentials } = useAppContext();
+  const settings = useParameterStore(currentCredentials);
+
+  // eslint-disable-next-line react/jsx-no-constructed-context-values
+  const settingsContextValue = {
+    settings,
+  };
+  logger.debug('settingsContextValue', settingsContextValue);
+
+  return (
+    <SettingsContext.Provider value={settingsContextValue}>
+      <Switch>
+        <Route path={CALLS_PATH}>
+          <CallsRoutes />
+        </Route>
+        <Route path={LOGIN_PATH}>
+          <Redirect to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`} />
+        </Route>
+        <Route path={LOGOUT_PATH}>
+          <SignOutComponent />
+        </Route>
+        <Route path={MEETINGS_QUERY_PATH}>
+          <MeetingsQueryRoutes />
+        </Route>
+        <Route path={STREAM_AUDIO_PATH}>
+          <StreamAudioRoutes />
+        </Route>
+        <Route path={VIRTUAL_PARTICIPANT_PATH}>
+          <VirtualParticipantRoutes />
+        </Route>
+        <Route>
+          <Redirect to={DEFAULT_PATH} />
+        </Route>
+      </Switch>
+    </SettingsContext.Provider>
+  );
+};
+
+AuthRoutes.propTypes = {
+  redirectParam: PropTypes.string.isRequired,
+};
+
+export default AuthRoutes;

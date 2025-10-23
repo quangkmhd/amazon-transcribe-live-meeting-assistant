@@ -1,0 +1,52 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+import React from 'react';
+import PropTypes from 'prop-types';
+import { Redirect, Route, Switch } from 'react-router-dom';
+
+import { Authenticator } from '@aws-amplify/ui-react';
+
+import { LOGIN_PATH, LOGOUT_PATH, REDIRECT_URL_PARAM } from './constants';
+
+// this is set at build time depending on the AllowedSignUpEmailDomain CloudFormation parameter
+const { REACT_APP_SHOULD_HIDE_SIGN_UP = 'true' } = process.env;
+
+const UnauthRoutes = ({ location }) => (
+  <Switch>
+    <Route path={LOGIN_PATH}>
+      <Authenticator hideSignUp={REACT_APP_SHOULD_HIDE_SIGN_UP === 'true'} signUpAttributes={['email']}>
+        {({ signOut, user }) => (
+          <div>
+            <p>Welcome {user?.username}!</p>
+            <button type="button" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
+        )}
+      </Authenticator>
+    </Route>
+    <Route path={LOGOUT_PATH}>
+      <Redirect to={LOGIN_PATH} />
+    </Route>
+    <Route>
+      <Redirect
+        to={{
+          pathname: LOGIN_PATH,
+          search: `?${REDIRECT_URL_PARAM}=${location.pathname}${location.search}`,
+        }}
+      />
+    </Route>
+  </Switch>
+);
+
+UnauthRoutes.propTypes = {
+  location: PropTypes.shape({
+    pathname: PropTypes.string,
+    search: PropTypes.string,
+  }).isRequired,
+};
+
+export default UnauthRoutes;

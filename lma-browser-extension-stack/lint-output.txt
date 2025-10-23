@@ -1,0 +1,146 @@
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\App.tsx
+   6:17  warning  'useState' is defined but never used                @typescript-eslint/no-unused-vars
+   7:8   warning  'logo' is defined but never used                    @typescript-eslint/no-unused-vars
+  10:10  warning  'Alert' is defined but never used                   @typescript-eslint/no-unused-vars
+  10:28  warning  'Button' is defined but never used                  @typescript-eslint/no-unused-vars
+  10:36  warning  'Container' is defined but never used               @typescript-eslint/no-unused-vars
+  10:47  warning  'ContentLayout' is defined but never used           @typescript-eslint/no-unused-vars
+  10:62  warning  'Header' is defined but never used                  @typescript-eslint/no-unused-vars
+  10:70  warning  'Link' is defined but never used                    @typescript-eslint/no-unused-vars
+  10:76  warning  'SpaceBetween' is defined but never used            @typescript-eslint/no-unused-vars
+  11:8   warning  'Meeting' is defined but never used                 @typescript-eslint/no-unused-vars
+  12:8   warning  'Login' is defined but never used                   @typescript-eslint/no-unused-vars
+  20:11  warning  'currentScreen' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  21:11  warning  'user' is assigned a value but never used           @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\screens\Capture.tsx
+   7:8    warning  'logo' is defined but never used                   @typescript-eslint/no-unused-vars
+   9:49   warning  'CopyToClipboard' is defined but never used        @typescript-eslint/no-unused-vars
+   9:104  warning  'Link' is defined but never used                   @typescript-eslint/no-unused-vars
+  10:8    warning  'UserMessage' is defined but never used            @typescript-eslint/no-unused-vars
+  11:8    warning  'OtherMessage' is defined but never used           @typescript-eslint/no-unused-vars
+  13:8    warning  'AssistantMessage' is defined but never used       @typescript-eslint/no-unused-vars
+  20:11   warning  'navigate' is assigned a value but never used      @typescript-eslint/no-unused-vars
+  29:10   warning  'formError' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  29:21   warning  'setFormError' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\screens\Login.tsx
+   7:8   warning  'logo' is defined but never used                  @typescript-eslint/no-unused-vars
+   9:49  warning  'Form' is defined but never used                  @typescript-eslint/no-unused-vars
+   9:55  warning  'FormField' is defined but never used             @typescript-eslint/no-unused-vars
+   9:72  warning  'Header' is defined but never used                @typescript-eslint/no-unused-vars
+   9:87  warning  'Link' is defined but never used                  @typescript-eslint/no-unused-vars
+  16:17  warning  'setLogin' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  17:20  warning  'setPassword' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\screens\LoginCognito.tsx
+   7:8   warning  'logo' is defined but never used                        @typescript-eslint/no-unused-vars
+   9:10  warning  'Box' is defined but never used                         @typescript-eslint/no-unused-vars
+   9:49  warning  'Form' is defined but never used                        @typescript-eslint/no-unused-vars
+   9:55  warning  'FormField' is defined but never used                   @typescript-eslint/no-unused-vars
+   9:72  warning  'Header' is defined but never used                      @typescript-eslint/no-unused-vars
+   9:80  warning  'Input' is defined but never used                       @typescript-eslint/no-unused-vars
+   9:87  warning  'Link' is defined but never used                        @typescript-eslint/no-unused-vars
+  15:11  warning  'navigate' is assigned a value but never used           @typescript-eslint/no-unused-vars
+  16:49  warning  'checkTokenExpired' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\screens\Meeting.tsx
+   7:8   warning  'logo' is defined but never used               @typescript-eslint/no-unused-vars
+   9:10  warning  'Box' is defined but never used                @typescript-eslint/no-unused-vars
+   9:49  warning  'CopyToClipboard' is defined but never used    @typescript-eslint/no-unused-vars
+   9:87  warning  'Link' is defined but never used               @typescript-eslint/no-unused-vars
+  18:17  warning  'setInput' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\views\AssistantMessage.tsx
+   7:8   warning  'logo' is defined but never used               @typescript-eslint/no-unused-vars
+   9:15  warning  'Button' is defined but never used             @typescript-eslint/no-unused-vars
+   9:23  warning  'Container' is defined but never used          @typescript-eslint/no-unused-vars
+   9:34  warning  'ContentLayout' is defined but never used      @typescript-eslint/no-unused-vars
+   9:49  warning  'ExpandableSection' is defined but never used  @typescript-eslint/no-unused-vars
+   9:74  warning  'Header' is defined but never used             @typescript-eslint/no-unused-vars
+   9:82  warning  'Input' is defined but never used              @typescript-eslint/no-unused-vars
+   9:89  warning  'Link' is defined but never used               @typescript-eslint/no-unused-vars
+   9:95  warning  'SpaceBetween' is defined but never used       @typescript-eslint/no-unused-vars
+  10:10  warning  'Theme' is defined but never used              @typescript-eslint/no-unused-vars
+  10:17  warning  'applyTheme' is defined but never used         @typescript-eslint/no-unused-vars
+  11:10  warning  'applyMode' is defined but never used          @typescript-eslint/no-unused-vars
+  11:21  warning  'Mode' is defined but never used               @typescript-eslint/no-unused-vars
+  13:29  warning  'responseTo' is defined but never used         @typescript-eslint/no-unused-vars
+  13:52  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\views\OtherMessage.tsx
+   7:8   warning  'logo' is defined but never used               @typescript-eslint/no-unused-vars
+   9:15  warning  'Button' is defined but never used             @typescript-eslint/no-unused-vars
+   9:23  warning  'Container' is defined but never used          @typescript-eslint/no-unused-vars
+   9:34  warning  'ContentLayout' is defined but never used      @typescript-eslint/no-unused-vars
+   9:55  warning  'Header' is defined but never used             @typescript-eslint/no-unused-vars
+   9:63  warning  'Input' is defined but never used              @typescript-eslint/no-unused-vars
+   9:70  warning  'Link' is defined but never used               @typescript-eslint/no-unused-vars
+  13:10  warning  'input' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  13:17  warning  'setInput' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\views\UserMessage.tsx
+   7:8   warning  'logo' is defined but never used               @typescript-eslint/no-unused-vars
+   9:15  warning  'Button' is defined but never used             @typescript-eslint/no-unused-vars
+   9:23  warning  'Container' is defined but never used          @typescript-eslint/no-unused-vars
+   9:34  warning  'ContentLayout' is defined but never used      @typescript-eslint/no-unused-vars
+   9:55  warning  'Header' is defined but never used             @typescript-eslint/no-unused-vars
+   9:63  warning  'Input' is defined but never used              @typescript-eslint/no-unused-vars
+   9:70  warning  'Link' is defined but never used               @typescript-eslint/no-unused-vars
+  13:10  warning  'input' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  13:17  warning  'setInput' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\components\views\ValueWithLabel.tsx
+  7:15  warning  'Button' is defined but never used         @typescript-eslint/no-unused-vars
+  7:23  warning  'Container' is defined but never used      @typescript-eslint/no-unused-vars
+  7:34  warning  'ContentLayout' is defined but never used  @typescript-eslint/no-unused-vars
+  7:49  warning  'Grid' is defined but never used           @typescript-eslint/no-unused-vars
+  7:55  warning  'Header' is defined but never used         @typescript-eslint/no-unused-vars
+  7:63  warning  'Input' is defined but never used          @typescript-eslint/no-unused-vars
+  7:70  warning  'Link' is defined but never used           @typescript-eslint/no-unused-vars
+  7:76  warning  'SpaceBetween' is defined but never used   @typescript-eslint/no-unused-vars
+  9:45  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\context\NavigationContext.tsx
+  11:14  warning  'screen' is defined but never used        @typescript-eslint/no-unused-vars
+  16:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\context\ProviderIntegrationContext.tsx
+    7:32  warning  'startTransition' is defined but never used            @typescript-eslint/no-unused-vars
+    7:85  warning  'useRef' is defined but never used                     @typescript-eslint/no-unused-vars
+   11:10  warning  'WebSocketHook' is defined but never used              @typescript-eslint/no-unused-vars
+   27:14  warning  'muteValue' is defined but never used                  @typescript-eslint/no-unused-vars
+   29:15  warning  'pauseValue' is defined but never used                 @typescript-eslint/no-unused-vars
+   31:24  warning  'user' is defined but never used                       @typescript-eslint/no-unused-vars
+   31:30  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+   31:35  warning  'userName' is defined but never used                   @typescript-eslint/no-unused-vars
+   31:53  warning  'meetingTopic' is defined but never used               @typescript-eslint/no-unused-vars
+   43:44  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+   78:9   warning  'connectionStatus' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  102:52  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+  132:13  warning  'response' is assigned a value but never used          @typescript-eslint/no-unused-vars
+  140:13  warning  'response' is assigned a value but never used          @typescript-eslint/no-unused-vars
+  158:55  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+  181:17  warning  'response' is assigned a value but never used          @typescript-eslint/no-unused-vars
+  209:52  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+  209:57  warning  'sender' is defined but never used                     @typescript-eslint/no-unused-vars
+  209:65  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+  209:70  warning  'sendResponse' is defined but never used               @typescript-eslint/no-unused-vars
+  209:84  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\context\SettingsContext.tsx
+  21:41  warning  Unexpected any. Specify a different type          @typescript-eslint/no-explicit-any
+  32:20  warning  'setSettings' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\context\UserContext.tsx
+  20:32  warning  'codeOrToken' is defined but never used   @typescript-eslint/no-unused-vars
+  20:53  warning  'grantType' is defined but never used     @typescript-eslint/no-unused-vars
+  22:29  warning  'user' is defined but never used          @typescript-eslint/no-unused-vars
+  26:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\AI_ENGINEER\dev\amazon-transcribe-live-meeting-assistant\lma-browser-extension-stack\src\index.tsx
+  64:9  warning  'reset' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+âœ– 115 problems (0 errors, 115 warnings)
+

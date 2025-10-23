@@ -1,0 +1,23 @@
+{
+  "name": "lma-migration-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Data migration scripts from AWS to Supabase",
+  "scripts": {
+    "migrate:dynamodb": "ts-node migrate-dynamodb-to-supabase.ts",
+    "migrate:s3": "ts-node migrate-s3-to-supabase.ts",
+    "migrate:all": "npm run migrate:dynamodb && npm run migrate:s3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.637.0",
+    "@aws-sdk/client-s3": "^3.637.0",
+    "@aws-sdk/util-dynamodb": "^3.637.0",
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.3"
+  }
+}
+

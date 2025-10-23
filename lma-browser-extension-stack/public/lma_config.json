@@ -1,0 +1,9 @@
+{
+  "wssEndpoint": "ws://localhost:8080/api/v1/ws",
+  "clientId": "test-client-id",
+  "cognitoDomain": "http://localhost:3000",
+  "cloudfrontEndpoint": "http://localhost:3000",
+  "recordingDisclaimer": "Important: You are responsible for complying with legal, corporate, and ethical restrictions that apply to recording meetings and calls. Do not use this solution to stream, record, or transcribe calls if otherwise prohibited.",
+  "recordingMessage": "This meeting is being recorded with Amazon Live Meeting Assistant - see https://amazon.com/live-meeting-assistant.",
+  "stopRecordingMessage": "Amazon Live Meeting Assistant recording stopped."
+}

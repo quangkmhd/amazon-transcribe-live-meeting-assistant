@@ -1,0 +1,12 @@
+
+> lma-ui@<VERSION_TOKEN> lint
+> npx eslint 'src/**/*.{js,jsx}'
+
+
+Oops! Something went wrong! :(
+
+ESLint: 8.57.0
+
+No files matching the pattern "'src/**/*.{js,jsx}'" were found.
+Please check for typing mistakes in the pattern.
+

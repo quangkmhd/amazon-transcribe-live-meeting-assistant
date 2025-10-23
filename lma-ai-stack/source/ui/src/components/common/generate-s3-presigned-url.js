@@ -1,0 +1,45 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+import { HttpRequest } from '@aws-sdk/protocol-http';
+import { S3RequestPresigner } from '@aws-sdk/s3-request-presigner';
+import { parseUrl } from '@aws-sdk/url-parser';
+import { Sha256 } from '@aws-crypto/sha256-browser';
+import { formatUrl } from '@aws-sdk/util-format-url';
+
+let newUrl = '';
+
+const generateS3PresignedUrl = async (url, credentials) => {
+  // prettier-ignore
+
+  // Parse the URL properly to handle URL-encoded characters
+  const urlObj = new URL(url);
+  const bucketName = urlObj.hostname.split('.')[0];
+  const region = urlObj.hostname.split('.')[2];
+  // Remove leading slash and decode URL-encoded characters
+  const key = decodeURIComponent(urlObj.pathname.substring(1));
+
+  // For presigning, we need to use the decoded key, not the encoded one
+  newUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
+
+  if (url.includes('detailType')) {
+    newUrl = url;
+  }
+
+  // const s3ObjectUrl = parseUrl(`https://${bucketName}.s3.${region}.amazonaws.com/${key}`);
+  const s3ObjectUrl = parseUrl(newUrl);
+
+  const presigner = new S3RequestPresigner({
+    credentials,
+    region,
+    sha256: Sha256, // In browsers
+  });
+  // Create a GET request from S3 url.
+  const presignedResponse = await presigner.presign(new HttpRequest(s3ObjectUrl));
+  const presignedUrl = formatUrl(presignedResponse);
+  return presignedUrl;
+};
+
+export default generateS3PresignedUrl;
