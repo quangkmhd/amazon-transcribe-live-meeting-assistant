@@ -1,0 +1,31 @@
+.DS_Store
+**/.DS_Store
+.idea
+
+**/opensearchpy_layer/python
+**/boto3_layer/python
+**/boto3_layer/boto3_lambda_layer.zip
+**/strands_layer/python
+**/strands_layer/strands_layer.zip
+**/node_transcriber_layer/transcriber-layer.zip
+.aws-sam
+samconfig.toml
+.checksum
+.commit-hash
+
+# DSR
+.dsr/
+!.dsr/issues.json
+!.dsr/settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+soniox_examples/
+*.mp3
+*.pcm_s16le
+images/
+*.env
