@@ -14,11 +14,19 @@ import { useNavigation } from './context/NavigationContext';
 import Capture from './components/screens/Capture';
 import LoginCognito from './components/screens/LoginCognito';
 import { useUserContext } from './context/UserContext';
+import { useSupabase } from './context/SupabaseContext';
 
 function App() {
 
   const { currentScreen } = useNavigation();
-  const { user, loggedIn } = useUserContext();
+  const { user: cognitoUser, loggedIn: cognitoLoggedIn } = useUserContext();
+  const { user: supabaseUser, isLoading } = useSupabase();
+
+  const isLoggedIn = cognitoLoggedIn || supabaseUser !== null;
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
 
   return (
     <AppLayout
@@ -26,7 +34,7 @@ function App() {
       navigationHide={true}
       toolsHide={true}
       content={
-        (loggedIn ? <Capture /> : <LoginCognito />)
+        (isLoggedIn ? <Capture /> : <LoginCognito />)
       }
     />
   );

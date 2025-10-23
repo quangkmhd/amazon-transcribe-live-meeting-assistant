@@ -36,13 +36,11 @@ const generateNavigationItems = (settings) => {
           type: 'link',
           text: 'Stream Audio (no extension)',
           href: `#${STREAM_AUDIO_PATH}`,
-          external: true,
         },
         {
           type: 'link',
           text: 'Virtual Participant (Preview)',
           href: `#${VIRTUAL_PARTICIPANT_PATH}`,
-          external: true,
         },
       ],
     },

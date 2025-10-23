@@ -8,6 +8,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
+import { useSupabase } from './SupabaseContext';
 
 type Call = {
   callEvent: string,
@@ -43,6 +44,7 @@ function IntegrationProvider({ children }: any) {
 
   const [currentCall, setCurrentCall] = useState({} as Call);
   const { user, checkTokenExpired, login } = useUserContext();
+  const { user: supabaseUser, session } = useSupabase();
   const settings = useSettings();
   const [metadata, setMetadata] = useState({
     userName: "",
@@ -57,9 +59,9 @@ function IntegrationProvider({ children }: any) {
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
-      authorization: `Bearer ${user.access_token}`,
-      id_token: `${user.id_token}`,
-      refresh_token: `${user.refresh_token}`
+      authorization: `Bearer ${session?.access_token || user.access_token}`,
+      id_token: `${session?.access_token || user.id_token}`,
+      refresh_token: `${session?.refresh_token || user.refresh_token}`
     },
     onOpen: (event) => {
       console.log('WebSocket connection opened:', event);
@@ -184,12 +186,20 @@ function IntegrationProvider({ children }: any) {
   }
 
   const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string) => {
-    if (await checkTokenExpired(user)) {
+    const isSupabaseAuth = supabaseUser !== null && session !== null;
+    const isCognitoAuth = user && user.access_token && !(await checkTokenExpired(user));
+    
+    if (!isSupabaseAuth && !isCognitoAuth) {
+      console.error('User not authenticated');
       login();
       return;
     }
 
     setShouldConnect(true);
+    
+    // Get user email from Supabase or Cognito
+    const userEmail = supabaseUser?.email || user?.attributes?.email || 'unknown@example.com';
+    
     const callMetadata = {
       callEvent: 'START',
       agentId: userName,
@@ -197,7 +207,8 @@ function IntegrationProvider({ children }: any) {
       toNumber: '+8001112222',
       callId: `${meetingTopic} - ${getTimestampStr()}`,
       samplingRate: 8000,
-      activeSpeaker: 'n/a'
+      activeSpeaker: 'n/a',
+      owner_email: userEmail
     }
 
     setCurrentCall(callMetadata);
@@ -229,7 +240,7 @@ function IntegrationProvider({ children }: any) {
       console.error('Error starting transcription:', exception);
       alert("If you recently installed or update LMA, please refresh the browser's page and try again.");
     }
-  }, [setShouldConnect, setCurrentCall, readyState, sendMessage, setIsTranscribing]);
+  }, [supabaseUser, session, checkTokenExpired, login, setShouldConnect, setCurrentCall, readyState, sendMessage, setIsTranscribing]);
 
   const stopTranscription = useCallback(() => {
     if (isTranscribing) {

@@ -159,7 +159,7 @@ export const writeMeetingStartEvent = async (
         meeting_id: callMetaData.callId,
         agent_id: callMetaData.agentId,
         status: 'started',
-        owner_email: callMetaData.agentId, // or extract from JWT
+        owner_email: callMetaData.owner_email || callMetaData.agentId,
     });
 
     server.log.info(

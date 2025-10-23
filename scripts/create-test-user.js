@@ -10,16 +10,16 @@ if (!supabaseAnonKey) {
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-async function createTestUser() {
-  console.log('Creating test user...');
+async function createTestUser(email, password) {
+  console.log(`Creating test user: ${email}...`);
   
   const { data, error } = await supabase.auth.signUp({
-    email: 'lma.testuser@gmail.com',
-    password: 'TestPassword123!',
+    email,
+    password,
     options: {
       emailRedirectTo: `${supabaseUrl}/auth/v1/callback`,
       data: {
-        username: 'testuser'
+        username: email.split('@')[0]
       }
     }
   });
@@ -33,8 +33,8 @@ async function createTestUser() {
   console.log('User ID:', data.user?.id);
   console.log('Email:', data.user?.email);
   console.log('\nCredentials:');
-  console.log('  Email: lma.testuser@gmail.com');
-  console.log('  Password: TestPassword123!');
+  console.log(`  Email: ${email}`);
+  console.log(`  Password: ${password}`);
   
   if (data.user && !data.user.confirmed_at) {
     console.log('\n⚠️  Note: Email confirmation may be required.');
@@ -42,4 +42,6 @@ async function createTestUser() {
   }
 }
 
-createTestUser();
+const email = process.argv[2] || 'lma.testuser@gmail.com';
+const password = process.argv[3] || 'TestPassword123!';
+createTestUser(email, password);

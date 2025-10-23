@@ -93,6 +93,7 @@ export type CallMetaData = {
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,
+    owner_email?: string,
 };
 
 export type SocketCallData = {

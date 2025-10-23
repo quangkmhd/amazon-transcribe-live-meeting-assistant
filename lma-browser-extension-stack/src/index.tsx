@@ -14,6 +14,7 @@ import NavigationProvider from './context/NavigationContext';
 import SettingsProvider from './context/SettingsContext';
 import UserProvider from './context/UserContext';
 import IntegrationProvider from './context/ProviderIntegrationContext';
+import { SupabaseProvider } from './context/SupabaseContext';
 
 const theme: Theme = {
   tokens: {
@@ -68,15 +69,17 @@ const root = ReactDOM.createRoot(
 );
 root.render(
   <React.StrictMode>
-    <SettingsProvider>
-      <UserProvider>
-        <NavigationProvider>
-          <IntegrationProvider>
-            <App />
-          </IntegrationProvider>
-        </NavigationProvider>
-      </UserProvider>
-    </SettingsProvider>
+    <SupabaseProvider>
+      <SettingsProvider>
+        <UserProvider>
+          <NavigationProvider>
+            <IntegrationProvider>
+              <App />
+            </IntegrationProvider>
+          </NavigationProvider>
+        </UserProvider>
+      </SettingsProvider>
+    </SupabaseProvider>
   </React.StrictMode>
 );
 

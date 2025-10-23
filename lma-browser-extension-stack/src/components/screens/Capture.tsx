@@ -15,10 +15,12 @@ import ValueWithLabel from '../views/ValueWithLabel';
 import { useUserContext } from '../../context/UserContext';
 import { useIntegration } from '../../context/ProviderIntegrationContext';
 import { useSettings } from '../../context/SettingsContext';
+import { useSupabase } from '../../context/SupabaseContext';
 
 function Capture() {
   const { navigate } = useNavigation();
   const { user, logout } = useUserContext();
+  const { signOut } = useSupabase();
   const settings = useSettings();
   const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
 
@@ -192,7 +194,10 @@ function Capture() {
               :
               <Button iconAlign="left" iconName="microphone" fullWidth={true} onClick={() => mute()}>Mute Me</Button>
             }
-            <Button fullWidth={true} onClick={() => logout()}>Log out</Button>
+            <Button fullWidth={true} onClick={async () => {
+              await signOut();
+              logout();
+            }}>Log out</Button>
           </Grid>
 
           <Grid gridDefinition={[{ colspan: 10, offset: 1 }]}>
