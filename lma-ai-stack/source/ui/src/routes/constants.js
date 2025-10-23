@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 export const LOGIN_PATH = '/login';
+export const REGISTER_PATH = '/register';
 export const LOGOUT_PATH = '/logout';
 export const CALLS_PATH = '/calls';
 export const STREAM_AUDIO_PATH = '/stream';
