@@ -8,7 +8,11 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:multi-tenancy": "node scripts/test-rls-isolation.js",
+    "test:rls": "node scripts/test-rls-isolation.js"
   },
   "repository": {
     "type": "git",
