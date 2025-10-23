@@ -29,3 +29,4 @@ soniox_examples/
 *.pcm_s16le
 images/
 *.env
+node_modules/

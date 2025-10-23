@@ -26,9 +26,8 @@ export async function insertTranscriptEvent(data: {
 }) {
     const { error } = await supabase.from('transcript_events').insert(data);
 
-    // Ignore duplicate errors (code 23505)
     if (error && error.code !== '23505') {
-        throw error;
+        throw new Error(error.message);
     }
 }
 
@@ -43,7 +42,7 @@ export async function upsertMeeting(data: {
     const { error } = await supabase.from('meetings').upsert(data, {
         onConflict: 'meeting_id',
     });
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 }
 
 // Update meeting recording info
@@ -80,7 +79,7 @@ export async function uploadRecording(
             upsert: false,
         });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) throw new Error(uploadError.message);
 
     const {
         data: { publicUrl },

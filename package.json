@@ -1,0 +1,27 @@
+{
+  "name": "amazon-transcribe-live-meeting-assistant",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quangkmhd/amazon-transcribe-live-meeting-assistant.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/quangkmhd/amazon-transcribe-live-meeting-assistant/issues"
+  },
+  "homepage": "https://github.com/quangkmhd/amazon-transcribe-live-meeting-assistant#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.56.1"
+  }
+}

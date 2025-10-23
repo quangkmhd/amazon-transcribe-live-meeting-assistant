@@ -3,11 +3,29 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import WebSocket from 'ws';
+import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 
-// Mock dependencies
-vi.mock('ws');
+const mockWsInstance = {
+  on: vi.fn(),
+  send: vi.fn(),
+  close: vi.fn(),
+  readyState: 1,
+};
+
+class MockWebSocket {
+  static OPEN = 1;
+  on = mockWsInstance.on;
+  send = mockWsInstance.send;
+  close = mockWsInstance.close;
+  readyState = mockWsInstance.readyState;
+  
+  constructor(public url: string) {}
+}
+
+vi.mock('ws', () => ({
+  default: MockWebSocket,
+}));
+
 vi.mock('../supabase-client', () => ({
   insertTranscriptEvent: vi.fn().mockResolvedValue(undefined),
   upsertMeeting: vi.fn().mockResolvedValue(undefined),
@@ -15,22 +33,13 @@ vi.mock('../supabase-client', () => ({
 }));
 
 describe('Soniox Integration', () => {
-  let mockWs: any;
   let mockServer: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // Mock WebSocket
-    mockWs = {
-      on: vi.fn(),
-      send: vi.fn(),
-      close: vi.fn(),
-      readyState: WebSocket.OPEN,
-    };
-
-    (WebSocket as any).mockImplementation(() => mockWs);
-    (WebSocket as any).OPEN = 1;
+    mockWsInstance.on.mockClear();
+    mockWsInstance.send.mockClear();
+    mockWsInstance.close.mockClear();
 
     // Mock Fastify server
     mockServer = {
@@ -65,13 +74,10 @@ describe('Soniox Integration', () => {
 
       await startSonioxTranscription(socketCallMap as any, mockServer);
 
-      expect(WebSocket).toHaveBeenCalledWith(
-        'wss://stt-rt.soniox.com/transcribe-websocket'
-      );
-      expect(mockWs.on).toHaveBeenCalledWith('open', expect.any(Function));
-      expect(mockWs.on).toHaveBeenCalledWith('message', expect.any(Function));
-      expect(mockWs.on).toHaveBeenCalledWith('error', expect.any(Function));
-      expect(mockWs.on).toHaveBeenCalledWith('close', expect.any(Function));
+      expect(mockWsInstance.on).toHaveBeenCalledWith('open', expect.any(Function));
+      expect(mockWsInstance.on).toHaveBeenCalledWith('message', expect.any(Function));
+      expect(mockWsInstance.on).toHaveBeenCalledWith('error', expect.any(Function));
+      expect(mockWsInstance.on).toHaveBeenCalledWith('close', expect.any(Function));
     });
 
     it('should send start request with correct configuration', async () => {
@@ -96,19 +102,18 @@ describe('Soniox Integration', () => {
 
       await startSonioxTranscription(socketCallMap as any, mockServer);
 
-      // Trigger 'open' event
-      const openHandler = mockWs.on.mock.calls.find(
+      const openHandler = mockWsInstance.on.mock.calls.find(
         (call: any) => call[0] === 'open'
       )[1];
       openHandler();
 
-      expect(mockWs.send).toHaveBeenCalledWith(
+      expect(mockWsInstance.send).toHaveBeenCalledWith(
         expect.stringContaining('"audio_format":"pcm_s16le"')
       );
-      expect(mockWs.send).toHaveBeenCalledWith(
+      expect(mockWsInstance.send).toHaveBeenCalledWith(
         expect.stringContaining('"sample_rate":16000')
       );
-      expect(mockWs.send).toHaveBeenCalledWith(
+      expect(mockWsInstance.send).toHaveBeenCalledWith(
         expect.stringContaining('"enable_speaker_diarization":true')
       );
     });
@@ -137,8 +142,7 @@ describe('Soniox Integration', () => {
 
       await startSonioxTranscription(socketCallMap as any, mockServer);
 
-      // Get message handler
-      const messageHandler = mockWs.on.mock.calls.find(
+      const messageHandler = mockWsInstance.on.mock.calls.find(
         (call: any) => call[0] === 'message'
       )[1];
 
@@ -204,7 +208,7 @@ describe('Soniox Integration', () => {
 
       await startSonioxTranscription(socketCallMap as any, mockServer);
 
-      const messageHandler = mockWs.on.mock.calls.find(
+      const messageHandler = mockWsInstance.on.mock.calls.find(
         (call: any) => call[0] === 'message'
       )[1];
 

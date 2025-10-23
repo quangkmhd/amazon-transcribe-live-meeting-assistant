@@ -15,10 +15,9 @@ describe('Supabase Client', () => {
   let mockSupabase: any;
 
   beforeEach(() => {
-    // Reset mocks
     vi.clearAllMocks();
+    vi.resetModules();
 
-    // Setup mock Supabase client
     mockSupabase = {
       from: vi.fn().mockReturnThis(),
       insert: vi.fn().mockResolvedValue({ error: null }),
@@ -36,7 +35,7 @@ describe('Supabase Client', () => {
       },
     };
 
-    (createClient as any).mockReturnValue(mockSupabase);
+    vi.mocked(createClient).mockReturnValue(mockSupabase as any);
   });
 
   describe('insertTranscriptEvent', () => {

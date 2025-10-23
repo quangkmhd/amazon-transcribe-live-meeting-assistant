@@ -214,6 +214,7 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
       segment_id: segmentId,
       start_time: startTime,
       end_time: endTime,
+      speaker_number: speakerNumber,
       speaker_name: speaker,
       transcript,
       is_partial: isPartial,
@@ -229,6 +230,7 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
       segmentId,
       startTime,
       endTime,
+      speaker_number: speakerNumber,
       speaker: speaker || channel,
       transcript,
       isPartial,
@@ -343,20 +345,20 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
 
       logger.debug('transcript segments response', transcriptSegments);
       if (transcriptSegments?.length > 0) {
-        const transcriptSegmentsReduced = transcriptSegments
-          .map((t) => mapTranscriptSegmentValue(t))
-          .reduce((p, c) => {
-            const previousSegments = p[c.channel]?.segments || [];
-            const lastSameSegmentId = previousSegments.filter((s) => s?.segmentId === c?.segmentId).pop();
-            const dedupedSegments = previousSegments.filter((s) => s.segmentId !== c.segmentId);
+        const mappedSegments = transcriptSegments.map((t) => mapTranscriptSegmentValue(t));
 
-            // prettier-ignore
-            const segment = !lastSameSegmentId?.sentiment && c?.sentiment
-              ? c
-              : lastSameSegmentId || c;
+        const transcriptSegmentsReduced = mappedSegments.reduce((p, c) => {
+          const previousSegments = p[c.channel]?.segments || [];
+          const lastSameSegmentId = previousSegments.filter((s) => s?.segmentId === c?.segmentId).pop();
+          const dedupedSegments = previousSegments.filter((s) => s.segmentId !== c.segmentId);
 
-            return { ...p, [c.channel]: { segments: [...dedupedSegments, segment] } };
-          }, {});
+          // prettier-ignore
+          const segment = !lastSameSegmentId?.sentiment && c?.sentiment
+            ? c
+            : lastSameSegmentId || c;
+
+          return { ...p, [c.channel]: { segments: [...dedupedSegments, segment] } };
+        }, {});
 
         setCallTranscriptPerCallId((current) => {
           logger.debug('updating callTranscriptPerCallId', current, transcriptSegmentsReduced);

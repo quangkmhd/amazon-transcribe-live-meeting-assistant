@@ -40,7 +40,15 @@ const CallDetails = () => {
     const callDetails = callsMap[0];
     if (callDetails) {
       setCall(callDetails);
+      console.log('[DEBUG CallDetails] callTranscriptPerCallId:', callTranscriptPerCallId);
+      console.log('[DEBUG CallDetails] callId:', callId);
+      console.log('[DEBUG CallDetails] Cached data for this call:', callTranscriptPerCallId[callId]);
+      console.log('[DEBUG CallDetails] Has cached data?', !!callTranscriptPerCallId[callId]);
       if (!callTranscriptPerCallId[callId]) {
+        console.log('[DEBUG CallDetails] Fetching transcript segments...');
+        await sendGetTranscriptSegmentsRequest(callId);
+      } else {
+        console.log('[DEBUG CallDetails] Using cached transcript data - forcing refetch');
         await sendGetTranscriptSegmentsRequest(callId);
       }
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {

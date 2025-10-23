@@ -18,12 +18,16 @@ const useParameterStore = (creds) => {
     let lcaSettings = {};
 
     if (credentials) {
-      const ssmClient = new SSMClient({ credentials, region: awsExports.aws_project_region });
-      const getParameterCmd = new GetParameterCommand({ Name: LCA_PARAMETER_NAME });
-      const response = await ssmClient.send(getParameterCmd);
-      if (response.Parameter?.Value) {
-        lcaSettings = JSON.parse(response.Parameter.Value);
-        console.log(response.Parameter.Value);
+      try {
+        const ssmClient = new SSMClient({ credentials, region: awsExports.aws_project_region });
+        const getParameterCmd = new GetParameterCommand({ Name: LCA_PARAMETER_NAME });
+        const response = await ssmClient.send(getParameterCmd);
+        if (response.Parameter?.Value) {
+          lcaSettings = JSON.parse(response.Parameter.Value);
+          console.log(response.Parameter.Value);
+        }
+      } catch (error) {
+        console.warn('[useParameterStore] AWS SSM not configured, skipping settings fetch:', error.message);
       }
     }
     setSettings(lcaSettings);
