@@ -41,6 +41,8 @@ import {
 } from './utils';
 
 import { jwtVerifier } from './utils/jwt-verifier';
+import { getPipelineLogger, closePipelineLogger } from './utils/pipeline-debug-logger';
+import { registerPipelineLogRoutes } from './routes/pipeline-log';
 
 const CPU_HEALTH_THRESHOLD = parseInt(
     process.env['CPU_HEALTH_THRESHOLD'] || '50',
@@ -68,6 +70,9 @@ const server = fastify({
 });
 // register the @fastify/websocket plugin with the fastify server
 server.register(websocket);
+
+// Register pipeline log routes (for Edge Function and UI to send logs)
+registerPipelineLogRoutes(server);
 
 // Setup preHandler hook to authenticate
 server.addHook('preHandler', async (request, reply) => {
@@ -222,6 +227,22 @@ const onBinaryMessage = async (
     socketData.writeRecordingStream !== undefined &&
     socketData.recordingFileSize !== undefined
     ) {
+        // Pipeline Debug: Log audio reception
+        if (!socketData.audioChunkCount) {
+            socketData.audioChunkCount = 0;
+        }
+        socketData.audioChunkCount++;
+        
+        // Log every 100th chunk to avoid flooding
+        if (socketData.audioChunkCount % 100 === 1) {
+            const logger = getPipelineLogger(socketData.callMetadata.callId);
+            logger.logAudioReceived(
+                socketData.callMetadata.callId,
+                data.length,
+                socketData.audioChunkCount
+            );
+        }
+        
         socketData.audioInputStream.write(data);
         socketData.writeRecordingStream.write(data);
         socketData.recordingFileSize += data.length;
@@ -344,6 +365,25 @@ const onTextMessage = async (
           ended: false,
       };
       socketMap.set(ws, socketCallMap);
+      
+      // Send acknowledgment to client that START event is fully processed
+      // and server is ready to receive audio data
+      ws.send(JSON.stringify({
+          event: 'START_ACK',
+          callId: callMetaData.callId,
+          message: 'Server ready to receive audio data'
+      }));
+      
+      server.log.debug(
+          `[START_ACK]: [${callMetaData.callId}] - Sent START_ACK to client`
+      );
+      
+      // Pipeline Debug: Initialize logger for this call
+      const logger = getPipelineLogger(callMetaData.callId);
+      server.log.info(
+          `[PIPELINE DEBUG]: [${callMetaData.callId}] - Pipeline debug logger initialized. Log file: ${logger.getLogFilePath()}`
+      );
+      
       startSonioxTranscription(socketCallMap, server);
   } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
       const socketData = socketMap.get(ws);
@@ -544,6 +584,13 @@ const endCall = async (
                         callMetaData.callId
                     }] - Deleting websocket from map: ${JSON.stringify(callMetaData)}`
                 );
+                
+                // Pipeline Debug: Close and finalize debug log
+                closePipelineLogger(callMetaData.callId);
+                server.log.info(
+                    `[PIPELINE DEBUG]: [${callMetaData.callId}] - Pipeline debug logger closed and finalized`
+                );
+                
                 socketMap.delete(ws);
             }
         } else {

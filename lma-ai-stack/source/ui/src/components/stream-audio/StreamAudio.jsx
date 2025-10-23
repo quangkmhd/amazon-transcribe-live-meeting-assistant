@@ -57,6 +57,9 @@ const StreamAudio = () => {
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
 
+  // Track START_ACK acknowledgment from server
+  const startAckReceived = useRef(null);
+
   useEffect(() => {
     let interval;
     if (recording) {
@@ -102,6 +105,23 @@ const StreamAudio = () => {
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Websocket onError Event: ${JSON.stringify(event)}
       `);
+    },
+    onMessage: (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.event === 'START_ACK') {
+          console.log(`
+            DEBUG - [${new Date().toISOString()}]: Received START_ACK from server for callId: ${message.callId}
+          `);
+          // Resolve the pending promise to start audio streaming
+          if (startAckReceived.current) {
+            startAckReceived.current();
+            startAckReceived.current = null;
+          }
+        }
+      } catch (error) {
+        // Not a JSON message, probably binary audio data - ignore
+      }
     },
     shouldReconnect: (closeEvent) => {
       // Only reconnect if we have valid tokens and it's not a normal closure
@@ -223,6 +243,7 @@ const StreamAudio = () => {
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
       recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
+      recordingCallMetaData.channels = 2; // Stereo: channel 0 = mic, channel 1 = display audio
       recordingCallMetaData.callEvent = 'START';
 
       // eslint-disable-next-line prettier/prettier
@@ -230,17 +251,34 @@ const StreamAudio = () => {
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 
-      // Wait for server to process START event before sending audio data
+      // Wait for server START_ACK acknowledgment before sending audio data
       console.log(`
-        DEBUG - [${new Date().toISOString()}]: Waiting 500ms for server to process START event...
+        DEBUG - [${new Date().toISOString()}]: Waiting for START_ACK from server...
       `);
+
       await new Promise((resolve) => {
-        setTimeout(() => {
+        // Store resolver in ref so onMessage can access it
+        startAckReceived.current = resolve;
+
+        // Timeout protection: if START_ACK doesn't arrive in 5 seconds, proceed anyway
+        const timeoutId = setTimeout(() => {
+          console.log(`
+            WARNING - [${new Date().toISOString()}]: START_ACK timeout after 5s, proceeding with audio streaming
+          `);
+          startAckReceived.current = null;
           resolve();
-        }, 500);
+        }, 5000);
+
+        // Clear timeout if START_ACK arrives
+        const originalResolve = resolve;
+        startAckReceived.current = () => {
+          clearTimeout(timeoutId);
+          originalResolve();
+        };
       });
+
       console.log(`
-        DEBUG - [${new Date().toISOString()}]: Starting audio capture and streaming...
+        DEBUG - [${new Date().toISOString()}]: START_ACK received, starting audio capture and streaming...
       `);
 
       displayAudioSource.current = audioContext.current.createMediaStreamSource(displayStream.current);

@@ -105,4 +105,5 @@ export type SocketCallData = {
     speakerEvents: [],
     ended: boolean,
     sonioxWs?: WebSocket, // Soniox WebSocket connection
+    audioChunkCount?: number, // Track number of audio chunks received for pipeline debugging
 }

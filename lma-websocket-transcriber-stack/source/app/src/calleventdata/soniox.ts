@@ -13,6 +13,7 @@ import {
 } from '../supabase-client';
 import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { getPipelineLogger } from '../utils/pipeline-debug-logger';
 
 const SONIOX_API_KEY = process.env['SONIOX_API_KEY']!;
 const SONIOX_WS_URL = 'wss://stt-rt.soniox.com/transcribe-websocket';
@@ -57,28 +58,44 @@ export const startSonioxTranscription = async (
             `[SONIOX]: [${callMetaData.callId}] - Connected to Soniox API`
         );
 
+        // Determine actual channel count from metadata or default to 2 (stereo)
+        const actualChannels = callMetaData.channels || 2;
+        
         // Send start request with speaker diarization
         const startRequest = {
             api_key: SONIOX_API_KEY,
             audio_format: 'pcm_s16le',
             sample_rate: callMetaData.samplingRate,
-            num_channels: 1, // Mono merged audio
+            num_channels: actualChannels, // Use actual channel count from audio stream
             model: 'stt-rt-preview-v2',
             enable_speaker_diarization: true,
             enable_endpoint_detection: true,
             language_hints: ['en', 'vi'],
         };
 
+        server.log.info(
+            `[SONIOX]: [${callMetaData.callId}] - Starting transcription with ${actualChannels} channel(s) at ${callMetaData.samplingRate}Hz`
+        );
+
         sonioxWs.send(JSON.stringify(startRequest));
     });
 
     // Forward audio chunks from browser to Soniox
     if (audioInputStream) {
+        let audioChunksSent = 0;
+        const pipelineLogger = getPipelineLogger(callMetaData.callId);
+        
         (async () => {
             try {
                 for await (const chunk of audioInputStream) {
                     if (sonioxWs.readyState === WebSocket.OPEN) {
                         sonioxWs.send(chunk);
+                        audioChunksSent++;
+                        
+                        // Log every 100th chunk sent to Soniox
+                        if (audioChunksSent % 100 === 1) {
+                            pipelineLogger.logSTTSent(callMetaData.callId, chunk.length);
+                        }
                     }
                 }
             } catch (error) {
@@ -101,6 +118,17 @@ export const startSonioxTranscription = async (
             });
 
             if (result.tokens && result.tokens.length > 0) {
+                const pipelineLogger = getPipelineLogger(callMetaData.callId);
+                
+                // Log partial transcripts
+                const partialTokens = result.tokens.filter((t: any) => !t.is_final);
+                if (partialTokens.length > 0) {
+                    const partialText = partialTokens.map((t: any) => t.text).join('');
+                    const speaker = partialTokens[0].speaker || '1';
+                    const speakerName = await getSpeakerName(callMetaData.callId, speaker);
+                    pipelineLogger.logSTTPartial(callMetaData.callId, partialText, speakerName || `Speaker ${speaker}`);
+                }
+                
                 const finalTokens = result.tokens.filter(
                     (t: any) => t.is_final
                 );
@@ -128,6 +156,8 @@ export const startSonioxTranscription = async (
                         speaker_groups: speakerGroups,
                     });
 
+                    const pipelineLogger = getPipelineLogger(callMetaData.callId);
+                    
                     for (const [speakerNumber, tokens] of Object.entries(
                         speakerGroups
                     )) {
@@ -135,6 +165,14 @@ export const startSonioxTranscription = async (
                             const speakerName = await getSpeakerName(
                                 callMetaData.callId,
                                 speakerNumber
+                            );
+                            
+                            const finalText = tokens.map((t: any) => t.text).join('');
+                            pipelineLogger.logSTTFinal(
+                                callMetaData.callId,
+                                finalText,
+                                speakerName || `Speaker ${speakerNumber}`,
+                                tokens[0].confidence
                             );
 
                             const transcriptData = {
@@ -177,6 +215,12 @@ export const startSonioxTranscription = async (
                                 `[SONIOX]: [${callMetaData.callId}] - Saved transcript for speaker ${speakerNumber}`
                             );
                         } catch (error: any) {
+                            const pipelineLogger = getPipelineLogger(callMetaData.callId);
+                            pipelineLogger.logSTTError(
+                                callMetaData.callId,
+                                `${error.code}: ${error.message}`
+                            );
+                            
                             logTranscriptDebug(
                                 callMetaData.callId,
                                 '5-AFTER_INSERT_TRANSCRIPT_EVENTS_ERROR',
@@ -210,6 +254,9 @@ export const startSonioxTranscription = async (
     });
 
     sonioxWs.on('error', (error) => {
+        const pipelineLogger = getPipelineLogger(callMetaData.callId);
+        pipelineLogger.logSTTError(callMetaData.callId, `WebSocket error: ${error}`);
+        
         server.log.error(
             `[SONIOX]: [${callMetaData.callId}] - WebSocket error: ${error}`
         );

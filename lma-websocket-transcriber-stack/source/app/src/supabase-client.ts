@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getPipelineLogger } from './utils/pipeline-debug-logger';
 
 const SUPABASE_URL = process.env['SUPABASE_URL']!;
 const SUPABASE_SERVICE_KEY = process.env['SUPABASE_SERVICE_KEY']!;
@@ -24,11 +25,28 @@ export async function insertTranscriptEvent(data: {
     end_time: number;
     is_final: boolean;
 }) {
+    const startTime = Date.now();
+    const logger = getPipelineLogger(data.meeting_id);
+    
+    // Log DB insert start
+    logger.logDBInsertStart(data.meeting_id, {
+        speaker: data.speaker_name || data.speaker_number,
+        segment_id: `${data.start_time}-${data.end_time}`,
+        transcript_length: data.transcript.length
+    });
+    
     const { error } = await supabase.from('transcript_events').insert(data);
+    
+    const duration = Date.now() - startTime;
 
     if (error && error.code !== '23505') {
+        // Log DB insert error
+        logger.logDBInsertError(data.meeting_id, error.message, duration);
         throw new Error(error.message);
     }
+    
+    // Log DB insert success
+    logger.logDBInsertSuccess(data.meeting_id, duration);
 }
 
 // Upsert meeting record
