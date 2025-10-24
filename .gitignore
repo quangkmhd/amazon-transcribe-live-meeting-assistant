@@ -30,3 +30,4 @@ images/
 *.env
 node_modules/
 *.txt
+*.md
