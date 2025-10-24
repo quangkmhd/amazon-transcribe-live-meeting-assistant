@@ -646,14 +646,21 @@ const CallInProgressTranscript = ({
           }
         });
 
-        // Accumulate final tokens (never remove, only add)
+        // Accumulate final tokens (never remove, only add) with deduplication
         if (Object.keys(newFinalBySpeaker).length > 0) {
           setFinalTokensBySpeaker((prev) => {
             const updated = { ...prev };
             Object.entries(newFinalBySpeaker).forEach(([speaker, tokens]) => {
               const previousCount = (prev[speaker] || []).length;
-              updated[speaker] = [...(prev[speaker] || []), ...tokens];
-              console.log(`  ✅ Speaker ${speaker}: ${previousCount} → ${updated[speaker].length} final tokens`);
+              const existingTokens = prev[speaker] || [];
+              // Create a Set of existing token identifiers for fast lookup
+              const existingIds = new Set(existingTokens.map((t) => `${t.start_ms}-${t.end_ms}-${t.text}`));
+              // Only add tokens that don't already exist
+              const newUniqueTokens = tokens.filter((t) => !existingIds.has(`${t.start_ms}-${t.end_ms}-${t.text}`));
+              updated[speaker] = [...existingTokens, ...newUniqueTokens];
+              console.log(
+                `  ✅ Speaker ${speaker}: ${previousCount} → ${updated[speaker].length} final tokens (${newUniqueTokens.length} new)`,
+              );
             });
             return updated;
           });
@@ -836,48 +843,75 @@ const CallInProgressTranscript = ({
     console.log('  finalTokensBySpeaker keys:', Object.keys(finalTokensBySpeaker));
     console.log('  nonFinalTokensBySpeaker keys:', Object.keys(nonFinalTokensBySpeaker));
 
-    // Convert final and non-final tokens to segments (like Soniox examples)
+    // Convert tokens to time-ordered segments grouped by speaker turns
     const liveTokenSegments = [];
 
-    // Process each speaker
-    const allSpeakers = new Set([...Object.keys(finalTokensBySpeaker), ...Object.keys(nonFinalTokensBySpeaker)]);
+    // Combine all tokens with speaker info
+    const allTokensWithSpeaker = [];
+    // Add final tokens
+    Object.entries(finalTokensBySpeaker).forEach(([speaker, tokens]) => {
+      tokens.forEach((token) => {
+        allTokensWithSpeaker.push({ ...token, speaker, is_final: true });
+      });
+    });
+    // Add non-final tokens
+    Object.entries(nonFinalTokensBySpeaker).forEach(([speaker, tokens]) => {
+      tokens.forEach((token) => {
+        allTokensWithSpeaker.push({ ...token, speaker, is_final: false });
+      });
+    });
 
-    allSpeakers.forEach((speaker) => {
-      const finalTokens = finalTokensBySpeaker[speaker] || [];
-      const nonFinalTokens = nonFinalTokensBySpeaker[speaker] || [];
-      const allTokens = [...finalTokens, ...nonFinalTokens];
+    // Sort all tokens by start time
+    allTokensWithSpeaker.sort((a, b) => a.start_ms - b.start_ms);
 
-      if (allTokens.length > 0) {
-        console.log(`🎤 Speaker ${speaker}:`);
-        console.log(`   Final tokens: ${finalTokens.length}, Non-final: ${nonFinalTokens.length}`);
-        console.log(
-          `   Sample tokens:`,
-          allTokens
-            .slice(0, 5)
-            .map((t) => `${t.text}${t.is_final ? '✓' : '?'}`)
-            .join(' '),
-        );
-      }
+    // Group tokens into segments by speaker turns (new segment when speaker changes)
+    let currentSegment = null;
 
-      // Create segment with tokens array for word-by-word rendering (like Soniox examples)
-      if (allTokens.length > 0) {
-        const channel = speaker === '1' ? 'AGENT' : 'CALLER';
-        // Keep full transcript for compatibility but also store tokens array
-        const transcript = allTokens.map((t) => t.text).join('');
-
-        liveTokenSegments.push({
-          transcript,
-          tokens: allTokens, // ✅ Store tokens array for word-by-word display
-          speaker_number: speaker,
+    allTokensWithSpeaker.forEach((token) => {
+      const shouldStartNewSegment = !currentSegment || currentSegment.speaker_number !== token.speaker;
+      if (shouldStartNewSegment) {
+        // Save previous segment
+        if (currentSegment) {
+          liveTokenSegments.push(currentSegment);
+        }
+        // Start new segment
+        const channel = token.speaker === '1' ? 'AGENT' : 'CALLER';
+        currentSegment = {
+          transcript: token.text,
+          tokens: [token],
+          speaker_number: token.speaker,
           speaker: channel,
           channel,
-          startTime: allTokens[0].start_ms / 1000,
-          endTime: allTokens[allTokens.length - 1].end_ms / 1000,
-          isPartial: nonFinalTokens.length > 0,
-          segmentId: `live-${speaker}-${allTokens.length}`,
-          createdAt: new Date().toISOString(),
-        });
+          startTime: token.start_ms / 1000,
+          endTime: token.end_ms / 1000,
+          isPartial: !token.is_final,
+          // ✅ Use start_ms as unique identifier (never changes for this segment)
+          segmentId: `live-${token.speaker}-${token.start_ms}`,
+          createdAt: new Date(token.start_ms).toISOString(), // ✅ Use token time, not current time
+        };
+      } else {
+        // Append to current segment
+        currentSegment.transcript += token.text;
+        currentSegment.tokens.push(token);
+        currentSegment.endTime = token.end_ms / 1000;
+        currentSegment.isPartial = currentSegment.isPartial || !token.is_final;
+        // ✅ DON'T override segmentId - keep the original one based on start_ms
       }
+    });
+    // Don't forget the last segment
+    if (currentSegment) {
+      liveTokenSegments.push(currentSegment);
+    }
+
+    console.log(`📊 Created ${liveTokenSegments.length} segments from ${allTokensWithSpeaker.length} tokens`);
+
+    console.log(`📊 Created ${liveTokenSegments.length} segments from ${allTokensWithSpeaker.length} tokens`);
+    liveTokenSegments.forEach((seg, i) => {
+      const wordCount = seg.transcript.split(' ').length;
+      console.log(
+        `    [${i}] Speaker ${seg.speaker_number}: ${wordCount} words, "${seg.transcript.substring(0, 50)}..."`,
+      );
+      console.log(`        Time: ${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s`);
     });
 
     // For live calls: ONLY show live tokens (don't mix with database)
@@ -886,13 +920,6 @@ const CallInProgressTranscript = ({
 
     console.log('🔍 [DEBUG SEGMENTS]');
     console.log('  Live token segments:', liveTokenSegments.length);
-    liveTokenSegments.forEach((seg, i) => {
-      const wordCount = seg.transcript.split(' ').length;
-      console.log(
-        `    [${i}] Speaker ${seg.speaker_number}: ${wordCount} words, "${seg.transcript.substring(0, 50)}..."`,
-      );
-      console.log(`        Time: ${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s`);
-    });
 
     const allSegments = hasLiveTokens
       ? liveTokenSegments // ✅ Live call: show ONLY real-time tokens
@@ -909,16 +936,14 @@ const CallInProgressTranscript = ({
 
     const currentTurnByTurnSegments = allSegments
       .reduce((accumulator, current) => {
-        if (
-          // prettier-ignore
-          !accumulator.length
-          || !shouldAppendToPreviousSegment(
-            { previous: accumulator[accumulator.length - 1], current },
-          )
-          // Enable it once it is compatible with translation
-          || translateOn
-        ) {
-          // Get copy of current segment to avoid direct modification
+        // For live tokens, DON'T merge - they're already grouped by speaker turn
+        const shouldMerge =
+          !hasLiveTokens &&
+          accumulator.length > 0 &&
+          shouldAppendToPreviousSegment({ previous: accumulator[accumulator.length - 1], current }) &&
+          !translateOn; // Don't merge if translation is on
+
+        if (!shouldMerge) {
           accumulator.push({ ...current });
         } else {
           appendToPreviousSegment({ previous: accumulator[accumulator.length - 1], current });
