@@ -68,9 +68,10 @@ export const startSonioxTranscription = async (
             audio_format: 'pcm_s16le',
             sample_rate: callMetaData.samplingRate,
             num_channels: actualChannels, // Use actual channel count from audio stream
-            model: 'stt-rt-preview-v2',
+            model: 'stt-rt-v3', // ✅ Upgraded to latest model for better accuracy
             enable_speaker_diarization: true,
             enable_endpoint_detection: true,
+            enable_language_identification: true, // ✅ Auto-detect language per token
             language_hints: ['en', 'vi'],
         };
 
