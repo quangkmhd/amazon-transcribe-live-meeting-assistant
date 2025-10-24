@@ -20,14 +20,27 @@ export const RecordingPlayer = ({ recordingUrl }) => {
   useEffect(async () => {
     if (recordingUrl) {
       let url;
-      logger.debug('recording url to presign', recordingUrl);
+      logger.debug('recording url to process', recordingUrl);
+
       try {
-        url = await generateS3PresignedUrl(recordingUrl, currentCredentials);
-        logger.debug('recording presigned url', url);
+        // Check if URL is from Supabase Storage (already public, no presigning needed)
+        const isSupabaseUrl = recordingUrl.includes('supabase.co/storage/v1/object/public/');
+
+        if (isSupabaseUrl) {
+          // Supabase URLs are already public, use directly
+          logger.debug('using Supabase public URL directly', recordingUrl);
+          url = recordingUrl;
+        } else {
+          // Legacy S3 URLs need presigning
+          logger.debug('presigning S3 URL', recordingUrl);
+          url = await generateS3PresignedUrl(recordingUrl, currentCredentials);
+          logger.debug('recording presigned url', url);
+        }
+
         setPreSignedUrl(url);
       } catch (error) {
         setErrorMessage('failed to get recording url - please try again later');
-        logger.error('failed generate recording s3 url', error);
+        logger.error('failed to process recording url', error);
       }
     }
   }, [recordingUrl, currentCredentials]);
