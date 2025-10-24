@@ -16,6 +16,7 @@ import { useUserContext } from '../../context/UserContext';
 import { useIntegration } from '../../context/ProviderIntegrationContext';
 import { useSettings } from '../../context/SettingsContext';
 import { useSupabase } from '../../context/SupabaseContext';
+import { useTranscriptSubscription } from '../../hooks/useTranscriptSubscription';
 
 function Capture() {
   const { navigate } = useNavigation();
@@ -30,6 +31,21 @@ function Capture() {
   const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
   const [formError, setFormError] = React.useState(false);
   const [showDisclaimer, setShowDisclaimer] = React.useState(false);
+
+  // 🎯 STAGE 6 FIX: Subscribe to transcripts and log UI_RECEIVED
+  const { transcripts, isLoading: transcriptsLoading, error: transcriptsError } = useTranscriptSubscription(
+    isTranscribing ? currentCall?.callId : null
+  );
+
+  // Debug log when transcripts are received
+  useEffect(() => {
+    if (transcripts.length > 0) {
+      console.log(`[Capture] 🎉 Stage 6 triggered! Received ${transcripts.length} transcripts`, {
+        latest: transcripts[transcripts.length - 1],
+        callId: currentCall?.callId
+      });
+    }
+  }, [transcripts, currentCall]);
 
   // componentDidMount:
   useEffect(() => {
@@ -155,6 +171,46 @@ function Capture() {
               <ValueWithLabel label="Name:">{agentName}</ValueWithLabel>
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
               <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
+              
+              {/* 🎯 STAGE 6 FIX: Display real-time transcripts */}
+              {transcripts.length > 0 && (
+                <Container
+                  header={
+                    <Header
+                      variant="h3"
+                      description={`${transcripts.length} transcript segments received`}
+                    >
+                      Live Transcripts (Stage 6 Active ✅)
+                    </Header>
+                  }
+                >
+                  <SpaceBetween size="s">
+                    {transcripts.slice(-5).map((t, idx) => (
+                      <Box key={t.id} padding="s" className="transcript-item">
+                        <SpaceBetween size="xxs">
+                          <Box fontSize="body-s" fontWeight="bold" color="text-label">
+                            {t.speaker || 'Unknown Speaker'}
+                          </Box>
+                          <Box fontSize="body-m">
+                            {t.transcript}
+                          </Box>
+                          {t.confidence && (
+                            <Box fontSize="body-s" color="text-status-inactive">
+                              Confidence: {(t.confidence * 100).toFixed(1)}%
+                            </Box>
+                          )}
+                        </SpaceBetween>
+                      </Box>
+                    ))}
+                  </SpaceBetween>
+                </Container>
+              )}
+              
+              {transcriptsError && (
+                <Box color="text-status-error">
+                  ❌ Transcript Error: {transcriptsError.message}
+                </Box>
+              )}
               {
                 paused === true ?
                   <>

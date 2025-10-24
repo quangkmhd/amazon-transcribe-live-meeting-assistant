@@ -93,7 +93,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
       }
     >
       <ColumnLayout columns={6} variant="text-grid">
-        <SpaceBetween size="xs">
+        <SpaceBetween key="meeting-id" size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Meeting ID</strong>
@@ -102,7 +102,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
           </div>
         </SpaceBetween>
 
-        <SpaceBetween size="xs">
+        <SpaceBetween key="initiation-timestamp" size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Initiation Timestamp</strong>
@@ -111,7 +111,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
           </div>
         </SpaceBetween>
 
-        <SpaceBetween size="xs">
+        <SpaceBetween key="last-update-timestamp" size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Last Update Timestamp</strong>
@@ -120,7 +120,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
           </div>
         </SpaceBetween>
 
-        <SpaceBetween size="xs">
+        <SpaceBetween key="duration" size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Duration</strong>
@@ -129,7 +129,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
           </div>
         </SpaceBetween>
 
-        <SpaceBetween size="xs">
+        <SpaceBetween key="status" size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Status</strong>
@@ -138,7 +138,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
           </div>
         </SpaceBetween>
         {item?.pcaUrl?.length && (
-          <SpaceBetween size="xs">
+          <SpaceBetween key="pca-url" size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
                 <strong>Post Meeting Analytics</strong>
@@ -150,7 +150,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
           </SpaceBetween>
         )}
         {item?.recordingUrl?.length && item?.recordingStatusLabel !== IN_PROGRESS_STATUS && (
-          <SpaceBetween size="xs">
+          <SpaceBetween key="recording-url" size="xs">
             <div>
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
                 <strong>Recording Audio</strong>
@@ -798,17 +798,18 @@ const CallInProgressTranscript = ({
           }}
         >
           ⚠️ Auto-scroll paused - scroll to bottom to resume
-          <Button
-            onClick={() => {
-              setUserHasScrolled(false);
-              bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-            }}
-            variant="inline-link"
-            iconName="angle-down"
-            style={{ marginLeft: '10px', fontSize: '12px' }}
-          >
-            Resume
-          </Button>
+          <span style={{ marginLeft: '10px' }}>
+            <Button
+              onClick={() => {
+                setUserHasScrolled(false);
+                bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              variant="inline-link"
+              iconName="angle-down"
+            >
+              Resume
+            </Button>
+          </span>
         </div>
       )}
       <ColumnLayout borders="horizontal" columns={1}>
@@ -1105,7 +1106,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
       ) : null}
     </Container>
     {collapseSentiment ? (
-      <Container style={{ display: collapseSentiment ? 'block' : 'none' }}>
+      <Container>
         <ColumnLayout columns={4} variant="text-grid">
           <SpaceBetween size="xs">
             <div>

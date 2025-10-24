@@ -43,7 +43,9 @@ export function stopPipelineLogPoller() {
 }
 
 async function pollAndWriteLogs() {
-    if (!supabaseClient) return;
+    if (!supabaseClient) {
+        return;
+    }
 
     const { data: logs, error } = await supabaseClient
         .from('pipeline_logs')
@@ -61,11 +63,14 @@ async function pollAndWriteLogs() {
         return;
     }
 
+    console.log(`[Pipeline Log Poller] Found ${logs.length} new logs`);
+
     for (const log of logs) {
         if (processedLogIds.has(log.id)) {
             continue;
         }
 
+        console.log(`[Pipeline Log Poller] Processing log: stage=${log.stage}, callId=${log.call_id}`);
         const logger = getPipelineLogger(log.call_id);
         
         switch (log.stage) {
@@ -88,6 +93,18 @@ async function pollAndWriteLogs() {
             case '5️⃣ REALTIME_BROADCAST':
                 logger.logRealtimeBroadcast(log.call_id, log.metadata);
                 break;
+            case '6️⃣ UI_RECEIVED':
+                console.log('[Pipeline Log Poller] ✅ Stage 6 UI_RECEIVED detected!');
+                logger.logUIReceived(
+                    log.call_id,
+                    log.transcript || '',
+                    log.speaker || 'Unknown',
+                    log.metadata
+                );
+                break;
+            default:
+                console.warn(`[Pipeline Log Poller] ⚠️  Unknown stage: ${log.stage}`);
+                break;
         }
 
         processedLogIds.add(log.id);
@@ -100,5 +117,5 @@ async function pollAndWriteLogs() {
         idsArray.slice(-1000).forEach(id => processedLogIds.add(id));
     }
 
-    console.log(`[Pipeline Log Poller] Processed ${logs.length} logs`);
+    console.log(`[Pipeline Log Poller] ✅ Processed ${logs.length} logs successfully`);
 }

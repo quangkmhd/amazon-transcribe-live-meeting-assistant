@@ -53,17 +53,29 @@ class PipelineDebugLogger {
   private stageTimings: Map<string, number> = new Map();
 
   constructor(callId: string) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const logDir = path.join(process.cwd(), 'debug-logs');
     
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }
     
-    this.logFile = path.join(logDir, `pipeline-${callId}-${timestamp}.txt`);
+    // Use callId as filename (sanitized) to prevent multiple files for same call
+    const sanitizedCallId = callId.replace(/[^a-zA-Z0-9-]/g, '_');
+    this.logFile = path.join(logDir, `pipeline-${sanitizedCallId}.txt`);
     this.startTime = new Date();
     
-    this.writeHeader(callId);
+    // Check if file already exists - if so, append instead of overwriting
+    const fileExists = fs.existsSync(this.logFile);
+    
+    if (!fileExists) {
+      this.writeHeader(callId);
+    } else {
+      console.log(`[Pipeline Logger] Reusing existing log file for callId: ${callId}`);
+      // Append a separator
+      fs.appendFileSync(this.logFile, `\n\n──────────────────────────────────────────────────────────────────────────────\n`);
+      fs.appendFileSync(this.logFile, `  Logger reattached at: ${this.startTime.toISOString()}\n`);
+      fs.appendFileSync(this.logFile, `──────────────────────────────────────────────────────────────────────────────\n\n`);
+    }
   }
 
   private writeHeader(callId: string): void {
@@ -273,6 +285,15 @@ PIPELINE STAGES:
       transcript: transcript.substring(0, 100), // Truncate long transcripts
       metadata
     });
+    
+    // 🎯 Enhanced console log for stage 6
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`🎉 STAGE 6 TRIGGERED! UI has received transcript`);
+    console.log(`Call ID: ${callId}`);
+    console.log(`Speaker: ${speaker}`);
+    console.log(`Transcript: ${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}`);
+    console.log(`Metadata:`, metadata);
+    console.log(`${'='.repeat(80)}\n`);
   }
 
   getLogContent(): string {

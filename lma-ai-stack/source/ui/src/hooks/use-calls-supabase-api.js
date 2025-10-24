@@ -162,40 +162,8 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
     };
   }, []);
 
-  // Send ACK to backend when UI receives transcript (for pipeline debugging)
-  const sendTranscriptACK = async (callId, transcriptSegment) => {
-    try {
-      const backendUrl = process.env.REACT_APP_WS_SERVER_URL || 'ws://localhost:8080/api/v1/ws';
-      const httpUrl = backendUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/api/v1/ws', '');
-      
-      await fetch(`${httpUrl}/api/v1/pipeline-log`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callId,
-          stage: '6️⃣ UI_RECEIVED',
-          speaker: transcriptSegment.speaker || 'Unknown',
-          transcript: transcriptSegment.transcript || '',
-          metadata: {
-            segmentId: transcriptSegment.segmentId,
-            isPartial: transcriptSegment.isPartial,
-            channel: transcriptSegment.channel,
-            receivedAt: new Date().toISOString(),
-          }
-        })
-      });
-      logger.debug('✅ Sent transcript ACK to backend:', transcriptSegment.segmentId);
-    } catch (error) {
-      // Silent fail - không ảnh hưởng đến UI
-      logger.debug('⚠️  Failed to send transcript ACK:', error.message);
-    }
-  };
-
   const handleCallTranscriptSegmentMessage = (transcriptSegment) => {
     const { callId, transcript, isPartial, channel } = transcriptSegment;
-
-    // 🚀 GỬI ACK VỀ BACKEND (Stage 6)
-    sendTranscriptACK(callId, transcriptSegment);
 
     setCallTranscriptPerCallId((current) => {
       logger.debug('setCallTrancriptPerCallId current: ', current);
@@ -273,13 +241,17 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
   // Subscribe to transcript segments for live meeting (onAddTranscriptSegment replacement)
   useEffect(() => {
     if (!liveTranscriptCallId) {
+      console.log('⚠️  [STAGE 6] No live call ID, skipping transcript subscription');
       return () => {};
     }
 
+    console.log('🎧 [STAGE 6] Setting up Supabase Realtime subscription...');
+    console.log('  Channel:', `transcripts:${liveTranscriptCallId}`);
+    console.log('  Call ID:', liveTranscriptCallId);
     logger.debug('Setting up transcript segments subscription for:', liveTranscriptCallId);
 
     const channel = supabase
-      .channel(`transcripts-${liveTranscriptCallId}`)
+      .channel(`transcripts:${liveTranscriptCallId}`)
       .on(
         'postgres_changes',
         {
@@ -289,20 +261,27 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
           filter: `meeting_id=eq.${liveTranscriptCallId}`,
         },
         (payload) => {
-          logger.debug('New transcript segment:', payload.new);
-          const transcriptSegment = mapTranscriptSegmentValue(payload.new);
-          const { callId, transcript, segmentId } = transcriptSegment;
-          if (callId !== liveTranscriptCallId) {
-            return;
-          }
-          if (transcript && segmentId) {
+          console.log('🎉 [STAGE 6] Received transcript from Supabase Realtime!');
+          console.log('  Payload:', payload);
+          logger.debug('Received transcript segment:', payload);
+          if (payload?.new) {
+            const transcriptSegment = mapTranscriptSegmentValue(payload.new);
+            console.log('  Mapped segment:', transcriptSegment);
             handleCallTranscriptSegmentMessage(transcriptSegment);
           }
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 [STAGE 6] Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [STAGE 6] Successfully subscribed to transcripts!');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ [STAGE 6] Subscription failed!');
+        }
+      });
 
     return () => {
+      console.log('🔌 [STAGE 6] Unsubscribing from transcripts');
       logger.debug('Unsubscribed from transcript segments');
       channel.unsubscribe();
     };

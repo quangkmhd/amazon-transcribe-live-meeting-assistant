@@ -78,7 +78,8 @@ registerPipelineLogRoutes(server);
 
 // Setup preHandler hook to authenticate
 server.addHook('preHandler', async (request, reply) => {
-    if (!request.url.includes('health')) {
+    // Bypass auth for health check and pipeline-log (internal debug endpoint)
+    if (!request.url.includes('health') && !request.url.includes('/api/v1/pipeline-log')) {
         const clientIP = getClientIP(request.headers);
         server.log.debug(
             `[AUTH]: [${clientIP}] - Received preHandler hook for authentication. URI: <${
