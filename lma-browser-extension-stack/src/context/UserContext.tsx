@@ -19,6 +19,7 @@ const initialUserContext = {
   logout: () => { },
   exchangeCodeForToken: async (codeOrToken: string, grantType: string) => { return true; },
   loggedIn: false,
+  isLoading: true,
   checkTokenExpired: async (user: User) => { return true; }
 };
 const UserContext = createContext(initialUserContext);
@@ -27,6 +28,7 @@ function UserProvider({ children }: any) {
   const [user, setUser] = useState<User>({});
   const settings = useSettings();
   const [loggedIn, setLoggedIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const isTokenExpired = (jwtToken: string) => {
     const [, payload] = jwtToken.split('.');
@@ -70,12 +72,16 @@ function UserProvider({ children }: any) {
             chrome.storage.local.remove('authTokens');
             setUser({});
             setLoggedIn(false);
+            setIsLoading(false);
             // try to refresh anyway
             exchangeCodeForToken(result.authTokens.refresh_token, 'refresh_token');
           } else {
             setUser(result.authTokens);
             setLoggedIn(true);
+            setIsLoading(false);
           }
+        } else {
+          setIsLoading(false);
         }
       });
     } else {
@@ -93,6 +99,7 @@ function UserProvider({ children }: any) {
       } else {
         logout();
       }
+      setIsLoading(false);
     }
 
   }, []);
@@ -169,7 +176,7 @@ function UserProvider({ children }: any) {
   }, [user, loggedIn]);
 
   return (
-    <UserContext.Provider value={{ user, login, logout, exchangeCodeForToken, loggedIn, checkTokenExpired }}>
+    <UserContext.Provider value={{ user, login, logout, exchangeCodeForToken, loggedIn, isLoading, checkTokenExpired }}>
       {children}
     </UserContext.Provider>
   );

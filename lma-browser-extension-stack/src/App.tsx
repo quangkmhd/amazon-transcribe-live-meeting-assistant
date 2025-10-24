@@ -19,12 +19,12 @@ import { useSupabase } from './context/SupabaseContext';
 function App() {
 
   const { currentScreen } = useNavigation();
-  const { user: cognitoUser, loggedIn: cognitoLoggedIn } = useUserContext();
-  const { user: supabaseUser, isLoading } = useSupabase();
+  const { user: cognitoUser, loggedIn: cognitoLoggedIn, isLoading: cognitoIsLoading } = useUserContext();
+  const { user: supabaseUser, isLoading: supabaseIsLoading } = useSupabase();
 
   const isLoggedIn = cognitoLoggedIn || supabaseUser !== null;
 
-  if (isLoading) {
+  if (cognitoIsLoading || supabaseIsLoading) {
     return <div>Loading...</div>;
   }
 
