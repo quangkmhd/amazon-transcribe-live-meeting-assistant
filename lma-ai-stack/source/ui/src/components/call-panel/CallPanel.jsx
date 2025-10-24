@@ -929,7 +929,7 @@ const CallInProgressTranscript = ({
             return segments;
           })
           .reduce((p, c) => [...p, ...c], [])
-          .sort((a, b) => a.endTime - b.endTime); // ✅ Completed call: show database
+          .sort((a, b) => a.startTime - b.startTime); // ✅ Completed call: sort by start time, not end time
 
     console.log('  Using:', hasLiveTokens ? 'LIVE TOKENS' : 'DATABASE');
     console.log('  Total segments to render:', allSegments.length);

@@ -224,8 +224,8 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
     return {
       callId,
       segmentId,
-      startTime,
-      endTime,
+      startTime: startTime / 1000, // Convert milliseconds to seconds
+      endTime: endTime / 1000, // Convert milliseconds to seconds
       speaker_number: speakerNumber,
       speaker: speaker || channel,
       transcript,
