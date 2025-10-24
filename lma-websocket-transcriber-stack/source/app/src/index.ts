@@ -57,6 +57,21 @@ const SHOULD_RECORD_CALL = (process.env['SHOULD_RECORD_CALL'] || '') === 'true';
 
 const socketMap = new Map<WebSocket, SocketCallData>();
 
+/**
+ * Broadcast a message to ALL WebSocket connections for a specific callId
+ * This enables both recording and viewing connections to receive real-time tokens
+ */
+export const broadcastToCallId = (callId: string, message: string): number => {
+    let sentCount = 0;
+    for (const [ws, socketData] of socketMap.entries()) {
+        if (socketData.callMetadata.callId === callId && ws.readyState === 1) {
+            ws.send(message);
+            sentCount++;
+        }
+    }
+    return sentCount;
+};
+
 // create fastify server (with logging enabled for non-PROD environments)
 const server = fastify({
     logger: {
@@ -366,6 +381,7 @@ const onTextMessage = async (
           startStreamTime: new Date(),
           speakerEvents: [],
           ended: false,
+          clientWs: ws, // ✅ Store client WebSocket to forward transcripts
       };
       socketMap.set(ws, socketCallMap);
       
@@ -419,6 +435,47 @@ const onTextMessage = async (
               }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
           );
       }
+  } else if (callMetaData.callEvent === 'SUBSCRIBE') {
+      // Viewing connection wants to subscribe to an existing call for real-time updates
+      server.log.debug(
+          `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Viewer subscribing to call`
+      );
+      
+      const socketCallMap: SocketCallData = {
+          callMetadata: {
+              callId: callMetaData.callId,
+              callEvent: callMetaData.callEvent,
+              fromNumber: callMetaData.fromNumber || 'Viewer',
+              toNumber: callMetaData.toNumber || 'System',
+              activeSpeaker: callMetaData.activeSpeaker || 'unknown',
+              agentId: callMetaData.agentId || 'viewer',
+              accessToken: callMetaData.accessToken,
+              idToken: callMetaData.idToken,
+              refreshToken: callMetaData.refreshToken,
+              shouldRecordCall: false,
+              samplingRate: callMetaData.samplingRate || 48000,
+              channels: callMetaData.channels || 2
+          },
+          audioInputStream: undefined,
+          writeRecordingStream: undefined,
+          recordingFileSize: 0,
+          startStreamTime: new Date(),
+          speakerEvents: [],
+          ended: false,
+          clientWs: ws,
+      };
+      socketMap.set(ws, socketCallMap);
+      
+      // Send acknowledgment
+      ws.send(JSON.stringify({
+          event: 'SUBSCRIBE_ACK',
+          callId: callMetaData.callId,
+          message: 'Subscribed to call for real-time updates'
+      }));
+      
+      server.log.debug(
+          `[SUBSCRIBE_ACK]: [${callMetaData.callId}] - Sent SUBSCRIBE_ACK to viewing client`
+      );
   } else if (callMetaData.callEvent === 'END') {
       const socketData = socketMap.get(ws);
       if (!socketData || !socketData.callMetadata) {

@@ -36,7 +36,10 @@ const initialIntegration = {
   },
   platform: "n/a",
   activeSpeaker: "n/a",
-  sendRecordingMessage: () => { }
+  sendRecordingMessage: () => { },
+  liveTranscripts: [] as any[], // ✅ Real-time transcripts from WebSocket
+  finalWords: '', // ✅ Final words (Soniox style)
+  nonFinalWords: '' // ✅ Non-final words (Soniox style)
 };
 const IntegrationContext = createContext(initialIntegration);
 
@@ -57,6 +60,9 @@ function IntegrationProvider({ children }: any) {
   const [muted, setMuted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [startEventSent, setStartEventSent] = useState(false);
+  const [liveTranscripts, setLiveTranscripts] = useState<any[]>([]); // ✅ Store real-time transcripts
+  const [finalWords, setFinalWords] = useState<string>(''); // ✅ Final words (like Soniox example)
+  const [nonFinalWords, setNonFinalWords] = useState<string>(''); // ✅ Non-final words (blue text)
 
   const { sendMessage, readyState, getWebSocket } = useWebSocket(settings.wssEndpoint as string, {
     queryParams: {
@@ -75,6 +81,57 @@ function IntegrationProvider({ children }: any) {
           setIsTranscribing(true);
           console.log('Transcription started via onOpen callback');
         }, 500);
+      }
+    },
+    onMessage: (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        
+        // ✅ Handle TOKENS message (word-by-word like Soniox web example)
+        if (message.event === 'TOKENS') {
+          console.log('[WebSocket] 🎯 Received TOKENS:', message.tokens.length, 'words');
+          
+          // Process tokens like Soniox web example
+          let newFinalText = '';
+          let newNonFinalText = '';
+          
+          message.tokens.forEach((token: any) => {
+            if (token.is_final) {
+              newFinalText += token.text;
+            } else {
+              newNonFinalText += token.text;
+            }
+          });
+          
+          // Update final words (append)
+          if (newFinalText) {
+            setFinalWords((prev) => prev + newFinalText);
+          }
+          
+          // Update non-final words (replace)
+          setNonFinalWords(newNonFinalText);
+          
+        } else if (message.event === 'TRANSCRIPT') {
+          // Keep old segment-based logic for final transcripts from database
+          console.log('[WebSocket] 📝 Received TRANSCRIPT segment:', {
+            speaker: message.speaker_name,
+            text: message.transcript?.substring(0, 50),
+            is_final: message.is_final
+          });
+          
+          if (message.is_final) {
+            setLiveTranscripts((prev) => [...prev, message]);
+          }
+        } else if (message.event === 'START_ACK') {
+          console.log('[WebSocket] ✅ Received START_ACK:', message);
+        } else {
+          console.log('[WebSocket] Received message:', message);
+        }
+      } catch (error) {
+        // Not JSON or binary data, ignore
+        if (!(event.data instanceof ArrayBuffer) && !(event.data instanceof Blob)) {
+          console.log('[WebSocket] Non-JSON message:', event.data);
+        }
       }
     },
     onClose: (event) => {
@@ -257,6 +314,9 @@ function IntegrationProvider({ children }: any) {
       setIsTranscribing(false);
       setPaused(false);
       setStartEventSent(false);
+      setLiveTranscripts([]); // ✅ Clear live transcripts on stop
+      setFinalWords(''); // ✅ Clear final words
+      setNonFinalWords(''); // ✅ Clear non-final words
       sendStopMessage();
     }
   }, [readyState, shouldConnect, isTranscribing, paused, setIsTranscribing, getWebSocket, sendMessage, setPaused, sendStopMessage, sendRecordingMessage]);
@@ -309,7 +369,8 @@ function IntegrationProvider({ children }: any) {
     <IntegrationContext.Provider value={{
       currentCall, isTranscribing, muted, setMuted, paused, setPaused,
       fetchMetadata, startTranscription, stopTranscription, metadata, platform,
-      activeSpeaker, sendRecordingMessage
+      activeSpeaker, sendRecordingMessage, liveTranscripts, // ✅ Expose real-time transcripts
+      finalWords, nonFinalWords // ✅ Expose word-by-word transcripts (Soniox style)
     }}>
       {children}
     </IntegrationContext.Provider>

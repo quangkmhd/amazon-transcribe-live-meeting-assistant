@@ -14,6 +14,7 @@ import {
 import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getPipelineLogger } from '../utils/pipeline-debug-logger';
+import { broadcastToCallId } from '../index';
 
 const SONIOX_API_KEY = process.env['SONIOX_API_KEY']!;
 const SONIOX_WS_URL = 'wss://stt-rt.soniox.com/transcribe-websocket';
@@ -110,6 +111,14 @@ export const startSonioxTranscription = async (
     sonioxWs.on('message', async (data: Buffer) => {
         try {
             const result = JSON.parse(data.toString());
+            
+            // 🔥 DEBUG: Log EVERY message from Soniox
+            console.log(`🔥 [SONIOX MESSAGE] Received from Soniox:`, {
+                hasTokens: !!result.tokens,
+                tokenCount: result.tokens?.length || 0,
+                finished: result.finished,
+                error: result.error_code
+            });
 
             logTranscriptDebug(callMetaData.callId, '1-SONIOX_RAW_RESPONSE', {
                 raw_result: result,
@@ -120,7 +129,33 @@ export const startSonioxTranscription = async (
             if (result.tokens && result.tokens.length > 0) {
                 const pipelineLogger = getPipelineLogger(callMetaData.callId);
                 
-                // Log partial transcripts
+                // Debug: Log token reception
+                const finalCount = result.tokens.filter((t: any) => t.is_final).length;
+                const nonFinalCount = result.tokens.filter((t: any) => !t.is_final).length;
+                console.log(`🎯 [SONIOX TOKENS] Received ${result.tokens.length} tokens: ${finalCount} final, ${nonFinalCount} non-final`);
+                
+                // ✅ BROADCAST TOKENS TO ALL CONNECTIONS (recording + viewing)
+                const tokenMessage = {
+                    event: 'TOKENS',
+                    callId: callMetaData.callId,
+                    tokens: result.tokens.map((t: any) => ({
+                        text: t.text,
+                        speaker: t.speaker || '1',
+                        is_final: t.is_final,
+                        start_ms: t.start_ms,
+                        end_ms: t.end_ms,
+                        confidence: t.confidence
+                    }))
+                };
+                
+                const sentCount = broadcastToCallId(callMetaData.callId, JSON.stringify(tokenMessage));
+                console.log(`✅ [TOKENS BROADCAST] Sent ${result.tokens.length} tokens to ${sentCount} WebSocket connection(s)`);
+                
+                if (sentCount === 0) {
+                    console.log(`⚠️ [TOKENS] No active WebSocket connections for callId: ${callMetaData.callId}`);
+                }
+                
+                // Log partial transcripts for debugging
                 const partialTokens = result.tokens.filter((t: any) => !t.is_final);
                 if (partialTokens.length > 0) {
                     const partialText = partialTokens.map((t: any) => t.text).join('');
@@ -214,6 +249,26 @@ export const startSonioxTranscription = async (
                             server.log.debug(
                                 `[SONIOX]: [${callMetaData.callId}] - Saved transcript for speaker ${speakerNumber}`
                             );
+                            
+                            // ✅ FORWARD FINAL transcript to browser
+                            if (socketCallMap.clientWs && socketCallMap.clientWs.readyState === 1) {
+                                const finalTranscript = {
+                                    event: 'TRANSCRIPT',
+                                    callId: callMetaData.callId,
+                                    transcript: transcriptData.transcript,
+                                    speaker_number: speakerNumber,
+                                    speaker_name: speakerName || `Speaker ${speakerNumber}`,
+                                    channel: transcriptData.channel,
+                                    start_time: transcriptData.start_time,
+                                    end_time: transcriptData.end_time,
+                                    is_partial: false,
+                                    is_final: true,
+                                };
+                                socketCallMap.clientWs.send(JSON.stringify(finalTranscript));
+                                server.log.debug(
+                                    `[SONIOX]: [${callMetaData.callId}] - Forwarded FINAL transcript to browser: "${transcriptData.transcript}"`
+                                );
+                            }
                         } catch (error: any) {
                             const pipelineLogger = getPipelineLogger(callMetaData.callId);
                             pipelineLogger.logSTTError(

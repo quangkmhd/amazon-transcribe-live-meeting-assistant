@@ -24,7 +24,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-soniox_examples/
 *.mp3
 *.pcm_s16le
 images/

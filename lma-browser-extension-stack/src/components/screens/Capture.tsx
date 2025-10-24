@@ -23,7 +23,7 @@ function Capture() {
   const { user, logout } = useUserContext();
   const { signOut } = useSupabase();
   const settings = useSettings();
-  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform } = useIntegration();
+  const { currentCall, muted, setMuted, paused, setPaused, activeSpeaker, metadata, fetchMetadata, isTranscribing, startTranscription, stopTranscription, platform, liveTranscripts, finalWords, nonFinalWords } = useIntegration();
 
   const [topic, setTopic] = React.useState("");
   const [agentName, setAgentName] = React.useState("");
@@ -172,37 +172,30 @@ function Capture() {
               <ValueWithLabel label="Meeting Topic:">{topic}</ValueWithLabel>
               <ValueWithLabel label="Active Speaker:">{activeSpeaker}</ValueWithLabel>
               
-              {/* 🎯 STAGE 6 FIX: Display real-time transcripts */}
-              {transcripts.length > 0 && (
+              {/* ✅ REAL-TIME WORD-BY-WORD TRANSCRIPTS (like Soniox web example) */}
+              {(finalWords || nonFinalWords) && (
                 <Container
                   header={
                     <Header
                       variant="h3"
-                      description={`${transcripts.length} transcript segments received`}
+                      description="Real-time transcription (word-by-word)"
                     >
-                      Live Transcripts (Stage 6 Active ✅)
+                      🎤 Live Transcript
                     </Header>
                   }
                 >
-                  <SpaceBetween size="s">
-                    {transcripts.slice(-5).map((t, idx) => (
-                      <Box key={t.id} padding="s" className="transcript-item">
-                        <SpaceBetween size="xxs">
-                          <Box fontSize="body-s" fontWeight="bold" color="text-label">
-                            {t.speaker || 'Unknown Speaker'}
-                          </Box>
-                          <Box fontSize="body-m">
-                            {t.transcript}
-                          </Box>
-                          {t.confidence && (
-                            <Box fontSize="body-s" color="text-status-inactive">
-                              Confidence: {(t.confidence * 100).toFixed(1)}%
-                            </Box>
-                          )}
-                        </SpaceBetween>
-                      </Box>
-                    ))}
-                  </SpaceBetween>
+                  <Box padding="m" style={{ 
+                    fontFamily: 'monospace', 
+                    fontSize: '16px',
+                    lineHeight: '1.6',
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word'
+                  }}>
+                    {/* Final words (black) */}
+                    <span style={{ color: '#000' }}>{finalWords}</span>
+                    {/* Non-final words (blue, like Soniox example) */}
+                    <span style={{ color: 'dodgerblue', fontStyle: 'italic' }}>{nonFinalWords}</span>
+                  </Box>
                 </Container>
               )}
               

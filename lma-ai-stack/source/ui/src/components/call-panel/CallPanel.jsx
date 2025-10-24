@@ -24,6 +24,7 @@ import {
 } from '@awsui/components-react';
 import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
+import useWebSocket from 'react-use-websocket';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { API, Logger, graphqlOperation } from 'aws-amplify';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
@@ -322,8 +323,28 @@ const TranscriptContent = ({ segment, translateCache }) => {
   const { settings } = useSettingsContext();
   const regex = settings?.CategoryAlertRegex ?? '.*';
 
-  const { transcript, segmentId, channel, targetLanguage, translateOn } = segment;
+  const { transcript, segmentId, channel, targetLanguage, translateOn, tokens } = segment;
 
+  // ✅ Word-by-word rendering for live transcripts (like Soniox examples)
+  if (tokens && tokens.length > 0) {
+    return (
+      <div style={{ display: 'inline' }}>
+        {tokens.map((token) => (
+          <span
+            key={`${segmentId}-token-${token.start_ms}-${token.end_ms}`}
+            style={{
+              color: token.is_final ? '#000000' : '#888888', // Dark for final, gray for non-final
+              fontWeight: token.is_final ? 'normal' : '300',
+            }}
+          >
+            {token.text}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  // ✅ Original rendering for database transcripts
   const k = segmentId.concat('-', targetLanguage);
 
   // prettier-ignore
@@ -375,8 +396,12 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // prettier-ignore
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={[rehypeRaw]}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={[rehypeRaw]}>{translatedText.trim()}</ReactMarkdown>
+        <ReactMarkdown rehypePlugins={[rehypeRaw]} components={{ end: 'span' }}>
+          {text.trim()}
+        </ReactMarkdown>
+        <ReactMarkdown className="translated-text" rehypePlugins={[rehypeRaw]} components={{ end: 'span' }}>
+          {translatedText.trim()}
+        </ReactMarkdown>
       </TextContent>
     );
   });
@@ -516,6 +541,8 @@ const CallInProgressTranscript = ({
   speakerIdentities,
   onSpeakerClick,
 }) => {
+  const { settings } = useSettingsContext();
+  const { user } = useAppContext();
   const bottomRef = useRef();
   const containerRef = useRef();
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
@@ -524,6 +551,10 @@ const CallInProgressTranscript = ({
   const [lastUpdated, setLastUpdated] = useState(Date.now());
   const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
+  // Separate final and non-final tokens per speaker (like Soniox examples)
+  const [finalTokensBySpeaker, setFinalTokensBySpeaker] = useState({});
+  const [nonFinalTokensBySpeaker, setNonFinalTokensBySpeaker] = useState({});
+  const [tokenUpdateCounter, setTokenUpdateCounter] = useState(0); // Force re-render trigger
 
   // channels: AGENT, AGENT_ASSIST, CALLER, CATEGORY_MATCH,
   // AGENT_VOICETONE, CALLER_VOICETONE
@@ -531,6 +562,148 @@ const CallInProgressTranscript = ({
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
   const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+
+  // WebSocket connection for real-time word-by-word transcripts (only for in-progress calls)
+  const JWT_TOKEN =
+    user?.signInUserSession?.accessToken?.jwtToken || localStorage.getItem('supabase-client-accesstokenjwt') || '';
+  const ID_TOKEN =
+    user?.signInUserSession?.idToken?.jwtToken || localStorage.getItem('supabase-client-idtokenjwt') || '';
+  const REFRESH_TOKEN =
+    user?.signInUserSession?.refreshToken?.jwtToken || localStorage.getItem('supabase-client-refreshtoken') || '';
+
+  // Accept both display label ('In Progress') AND database status ('started')
+  const isLiveCall = item.recordingStatusLabel === IN_PROGRESS_STATUS || item.status?.toLowerCase?.() === 'started';
+
+  console.log('🔌 [WEBSOCKET DEBUG]');
+  console.log('  Database status:', item.status);
+  console.log('  Display label:', item.recordingStatusLabel);
+  console.log('  Expected:', IN_PROGRESS_STATUS, 'OR', 'started');
+  console.log('  isLiveCall:', isLiveCall);
+  console.log('  WSEndpoint:', settings.WSEndpoint);
+  console.log('  Has JWT_TOKEN:', !!JWT_TOKEN);
+  console.log('  Will skip WebSocket?', !isLiveCall || !settings.WSEndpoint || !JWT_TOKEN);
+
+  const { lastMessage, sendMessage } = useWebSocket(settings.WSEndpoint, {
+    queryParams: {
+      authorization: `Bearer ${JWT_TOKEN}`,
+      id_token: ID_TOKEN,
+      refresh_token: REFRESH_TOKEN,
+    },
+    shouldReconnect: () => isLiveCall,
+    skip: !isLiveCall || !settings.WSEndpoint || !JWT_TOKEN,
+    share: true, // Share connection across components
+    onOpen: () => {
+      // Send SUBSCRIBE event to register this viewing connection
+      const subscribeEvent = {
+        callEvent: 'SUBSCRIBE',
+        callId,
+      };
+      console.log('🔗 [WEBSOCKET] Connected! Sending SUBSCRIBE event:', subscribeEvent);
+      sendMessage(JSON.stringify(subscribeEvent));
+    },
+  });
+
+  // Handle real-time WebSocket messages for word-by-word display (like Soniox examples)
+  useEffect(() => {
+    if (!lastMessage) {
+      console.log('⚠️ [WEBSOCKET] No lastMessage');
+      return;
+    }
+    if (!isLiveCall) {
+      console.log('⚠️ [WEBSOCKET] Not a live call, skipping message');
+      return;
+    }
+
+    console.log('📨 [WEBSOCKET] Received message:', lastMessage.data.substring(0, 100));
+
+    try {
+      const message = JSON.parse(lastMessage.data);
+
+      // Handle TOKENS event (word-by-word updates)
+      if (message.event === 'TOKENS' && message.callId === callId) {
+        const tokenTexts = message.tokens.map((t) => `${t.text}${t.is_final ? '✓' : '?'}`).join(' ');
+        console.log(`📝 [TOKENS] Received ${message.tokens.length} tokens:`, tokenTexts);
+
+        // Separate final and non-final tokens per speaker (like Soniox examples)
+        const newFinalBySpeaker = {};
+        const newNonFinalBySpeaker = {};
+
+        message.tokens.forEach((token) => {
+          const speakerKey = token.speaker || '1';
+
+          if (token.is_final) {
+            // Final tokens: accumulate
+            if (!newFinalBySpeaker[speakerKey]) {
+              newFinalBySpeaker[speakerKey] = [];
+            }
+            newFinalBySpeaker[speakerKey].push(token);
+          } else {
+            // Non-final tokens: replace
+            if (!newNonFinalBySpeaker[speakerKey]) {
+              newNonFinalBySpeaker[speakerKey] = [];
+            }
+            newNonFinalBySpeaker[speakerKey].push(token);
+          }
+        });
+
+        // Accumulate final tokens (never remove, only add)
+        if (Object.keys(newFinalBySpeaker).length > 0) {
+          setFinalTokensBySpeaker((prev) => {
+            const updated = { ...prev };
+            Object.entries(newFinalBySpeaker).forEach(([speaker, tokens]) => {
+              const previousCount = (prev[speaker] || []).length;
+              updated[speaker] = [...(prev[speaker] || []), ...tokens];
+              console.log(`  ✅ Speaker ${speaker}: ${previousCount} → ${updated[speaker].length} final tokens`);
+            });
+            return updated;
+          });
+        }
+
+        // Replace non-final tokens with latest (ALWAYS replace, even if empty array)
+        setNonFinalTokensBySpeaker((prev) => {
+          const updated = { ...prev };
+
+          // First, clear all non-final tokens (since Soniox sends complete replacement)
+          Object.keys(updated).forEach((speaker) => {
+            if (!newNonFinalBySpeaker[speaker]) {
+              delete updated[speaker];
+            }
+          });
+
+          // Then add new non-final tokens
+          Object.entries(newNonFinalBySpeaker).forEach(([speaker, tokens]) => {
+            updated[speaker] = tokens;
+            console.log(`  ⏳ Speaker ${speaker}: ${tokens.length} non-final tokens (replaced)`);
+          });
+
+          return updated;
+        });
+
+        // Force immediate re-render by incrementing counter
+        setTokenUpdateCounter((prev) => prev + 1);
+        console.log(`🔄 [STATE UPDATE] Triggering re-render with new tokens`);
+      }
+
+      // Handle TRANSCRIPT event (final complete transcript from database)
+      if (message.event === 'TRANSCRIPT' && message.callId === callId) {
+        console.log('✅ [TRANSCRIPT] Received final from DB:', message.transcript);
+        // Clear tokens for this speaker since DB has the final version
+        const speaker = message.speaker_number;
+        setFinalTokensBySpeaker((prev) => {
+          const updated = { ...prev };
+          delete updated[speaker];
+          return updated;
+        });
+        setNonFinalTokensBySpeaker((prev) => {
+          const updated = { ...prev };
+          delete updated[speaker];
+          return updated;
+        });
+      }
+    } catch (error) {
+      // Not a JSON message or parsing error
+    }
+  }, [lastMessage, isLiveCall, callId]);
 
   const getSegments = () => {
     const currentTurnByTurnSegments = transcriptChannels
@@ -659,13 +832,82 @@ const CallInProgressTranscript = ({
   }, [callTranscriptPerCallId]);
 
   const getTurnByTurnSegments = () => {
-    const currentTurnByTurnSegments = transcriptChannels
-      .map((c) => {
-        const { segments } = transcriptsForThisCallId[c];
-        return segments;
-      })
-      // sort entries by end time
-      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
+    console.log('🔍 [RENDER] getTurnByTurnSegments called');
+    console.log('  finalTokensBySpeaker keys:', Object.keys(finalTokensBySpeaker));
+    console.log('  nonFinalTokensBySpeaker keys:', Object.keys(nonFinalTokensBySpeaker));
+
+    // Convert final and non-final tokens to segments (like Soniox examples)
+    const liveTokenSegments = [];
+
+    // Process each speaker
+    const allSpeakers = new Set([...Object.keys(finalTokensBySpeaker), ...Object.keys(nonFinalTokensBySpeaker)]);
+
+    allSpeakers.forEach((speaker) => {
+      const finalTokens = finalTokensBySpeaker[speaker] || [];
+      const nonFinalTokens = nonFinalTokensBySpeaker[speaker] || [];
+      const allTokens = [...finalTokens, ...nonFinalTokens];
+
+      if (allTokens.length > 0) {
+        console.log(`🎤 Speaker ${speaker}:`);
+        console.log(`   Final tokens: ${finalTokens.length}, Non-final: ${nonFinalTokens.length}`);
+        console.log(
+          `   Sample tokens:`,
+          allTokens
+            .slice(0, 5)
+            .map((t) => `${t.text}${t.is_final ? '✓' : '?'}`)
+            .join(' '),
+        );
+      }
+
+      // Create segment with tokens array for word-by-word rendering (like Soniox examples)
+      if (allTokens.length > 0) {
+        const channel = speaker === '1' ? 'AGENT' : 'CALLER';
+        // Keep full transcript for compatibility but also store tokens array
+        const transcript = allTokens.map((t) => t.text).join('');
+
+        liveTokenSegments.push({
+          transcript,
+          tokens: allTokens, // ✅ Store tokens array for word-by-word display
+          speaker_number: speaker,
+          speaker: channel,
+          channel,
+          startTime: allTokens[0].start_ms / 1000,
+          endTime: allTokens[allTokens.length - 1].end_ms / 1000,
+          isPartial: nonFinalTokens.length > 0,
+          segmentId: `live-${speaker}-${allTokens.length}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    });
+
+    // For live calls: ONLY show live tokens (don't mix with database)
+    // For completed calls: show database segments only
+    const hasLiveTokens = liveTokenSegments.length > 0;
+
+    console.log('🔍 [DEBUG SEGMENTS]');
+    console.log('  Live token segments:', liveTokenSegments.length);
+    liveTokenSegments.forEach((seg, i) => {
+      const wordCount = seg.transcript.split(' ').length;
+      console.log(
+        `    [${i}] Speaker ${seg.speaker_number}: ${wordCount} words, "${seg.transcript.substring(0, 50)}..."`,
+      );
+      console.log(`        Time: ${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s`);
+    });
+
+    const allSegments = hasLiveTokens
+      ? liveTokenSegments // ✅ Live call: show ONLY real-time tokens
+      : transcriptChannels
+          .map((c) => {
+            const { segments } = transcriptsForThisCallId[c];
+            return segments;
+          })
+          .reduce((p, c) => [...p, ...c], [])
+          .sort((a, b) => a.endTime - b.endTime); // ✅ Completed call: show database
+
+    console.log('  Using:', hasLiveTokens ? 'LIVE TOKENS' : 'DATABASE');
+    console.log('  Total segments to render:', allSegments.length);
+
+    const currentTurnByTurnSegments = allSegments
       .reduce((accumulator, current) => {
         if (
           // prettier-ignore
@@ -747,6 +989,9 @@ const CallInProgressTranscript = ({
     translateOn,
     updateFlag,
     speakerIdentities,
+    finalTokensBySpeaker,
+    nonFinalTokensBySpeaker,
+    tokenUpdateCounter, // Trigger re-render when tokens update
   ]);
 
   useEffect(() => {
