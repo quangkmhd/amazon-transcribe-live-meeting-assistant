@@ -5,7 +5,6 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Badge,
   Box,
   Button,
   ButtonDropdown,
@@ -15,7 +14,6 @@ import {
   Header,
   Icon,
   Link,
-  Popover,
   SpaceBetween,
   StatusIndicator,
   Tabs,
@@ -26,16 +24,15 @@ import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import useWebSocket from 'react-use-websocket';
 import { API, Logger, graphqlOperation } from 'aws-amplify';
-import { GeminiTranslateClient, TranslateTextCommand } from '../../utils/gemini-translate';
+// Translation temporarily disabled in Soniox pattern
+// import { GeminiTranslateClient, TranslateTextCommand } from '../../utils/gemini-translate';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
-import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
 
 import RecordingPlayer from '../recording-player';
 import useSettingsContext from '../../contexts/settings';
 
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { InfoLink } from '../common/info-link';
-import { getWeightedSentimentLabel } from '../common/sentiment';
 
 import { VoiceToneFluctuationChart, SentimentFluctuationChart, SentimentPerQuarterChart } from './sentiment-charts';
 
@@ -57,10 +54,8 @@ import SpeakerIdentificationModal from './SpeakerIdentificationModal';
 
 const logger = new Logger('CallPanel');
 
-// comprehend PII types
-const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]`);
-
-const MAXIMUM_ATTEMPTS = 100;
+// Translation disabled
+// const MAXIMUM_ATTEMPTS = 100;
 
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
@@ -264,49 +259,6 @@ const CallSummary = ({ item }) => {
   );
 };
 
-const getSentimentImage = (segment, enableSentimentAnalysis) => {
-  const { sentiment, sentimentScore, sentimentWeighted } = segment;
-  if (!sentiment || !enableSentimentAnalysis) {
-    // returns an empty div to maintain spacing
-    return <div className="sentiment-image" />;
-  }
-  const weightedSentimentLabel = getWeightedSentimentLabel(sentimentWeighted);
-  return (
-    <Popover
-      dismissAriaLabel="Close"
-      header="Sentiment"
-      size="medium"
-      triggerType="custom"
-      content={
-        <SpaceBetween size="s">
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              Sentiment
-            </Box>
-            <div>{sentiment}</div>
-          </div>
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              Sentiment Scores
-            </Box>
-            <div>{JSON.stringify(sentimentScore)}</div>
-          </div>
-          <div>
-            <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              Weighted Sentiment
-            </Box>
-            <div>{sentimentWeighted}</div>
-          </div>
-        </SpaceBetween>
-      }
-    >
-      <div className="sentiment-image-popover">
-        <SentimentIcon sentiment={weightedSentimentLabel} />
-      </div>
-    </Popover>
-  );
-};
-
 const getTimestampFromSeconds = (secs) => {
   if (secs === null || secs === undefined || Number.isNaN(secs)) {
     return '00:00.0';
@@ -314,107 +266,7 @@ const getTimestampFromSeconds = (secs) => {
   return new Date(secs * 1000).toISOString().substr(14, 7);
 };
 
-const getTimestampFromMilliseconds = (ms) => {
-  if (ms === null || ms === undefined || Number.isNaN(ms)) {
-    return '00:00.0';
-  }
-  return new Date(ms).toISOString().substr(14, 7);
-};
-
-const TranscriptContent = ({ segment, translateCache }) => {
-  const { settings } = useSettingsContext();
-  const regex = settings?.CategoryAlertRegex ?? '.*';
-
-  const { transcript, segmentId, channel, targetLanguage, translateOn, tokens } = segment;
-
-  // ✅ Word-by-word rendering for live transcripts (like Soniox examples)
-  if (tokens && tokens.length > 0) {
-    return (
-      <div style={{ display: 'inline' }}>
-        {tokens.map((token) => (
-          <span
-            key={`${segmentId}-token-${token.start_ms}-${token.end_ms}`}
-            style={{
-              color: token.is_final ? '#000000' : '#888888', // Dark for final, gray for non-final
-              fontWeight: token.is_final ? 'normal' : '300',
-            }}
-          >
-            {token.text}
-          </span>
-        ))}
-      </div>
-    );
-  }
-
-  // ✅ Original rendering for database transcripts
-  const k = segmentId.concat('-', targetLanguage);
-
-  // prettier-ignore
-  const currTranslated = translateOn
-    && targetLanguage !== ''
-    && translateCache[k] !== undefined
-    && translateCache[k].translated !== undefined
-    ? translateCache[k].translated
-    : '';
-
-  const result = currTranslated !== undefined ? currTranslated : '';
-
-  const transcriptPiiSplit = transcript.split(piiTypesSplitRegEx);
-
-  const transcriptComponents = transcriptPiiSplit.map((t, i) => {
-    if (COMPREHEND_PII_TYPES.includes(t)) {
-      // eslint-disable-next-line react/no-array-index-key
-      return <Badge key={`${segmentId}-pii-${i}`} color="red">{`${t}`}</Badge>;
-    }
-
-    let className = '';
-    let text = t;
-    let translatedText = result;
-
-    switch (channel) {
-      case 'AGENT_ASSISTANT':
-      case 'MEETING_ASSISTANT':
-        className = 'transcript-segment-agent-assist';
-        break;
-      case 'AGENT':
-      case 'CALLER':
-        text = text.substring(text.indexOf(':') + 1).trim();
-        translatedText = translatedText.substring(translatedText.indexOf(':') + 1).trim();
-        break;
-      case 'CATEGORY_MATCH':
-        if (text.match(regex)) {
-          className = 'transcript-segment-category-match-alert';
-          text = `Alert: ${text}`;
-        } else {
-          className = 'transcript-segment-category-match';
-          text = `Category: ${text}`;
-        }
-        break;
-      default:
-        break;
-    }
-
-    return (
-      // prettier-ignore
-      // eslint-disable-next-line react/no-array-index-key
-      <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={[rehypeRaw]} components={{ end: 'span' }}>
-          {text.trim()}
-        </ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={[rehypeRaw]} components={{ end: 'span' }}>
-          {translatedText.trim()}
-        </ReactMarkdown>
-      </TextContent>
-    );
-  });
-
-  return (
-    <SpaceBetween direction="horizontal" size="xxs">
-      {transcriptComponents}
-    </SpaceBetween>
-  );
-};
-
+/* ✅ REPLACED BY TokenBlock - using Soniox pattern instead
 const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, onSpeakerClick, speakerIdentities }) => {
   const { channel } = segment;
 
@@ -498,11 +350,9 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
     </Grid>
   );
 };
+*/
 
-/**
- * ✅ SONIOX PATTERN: Group tokens into blocks by speaker (simplified)
- * This follows the exact pattern from Soniox React Native example
- */
+// ✅ End of commented out TranscriptSegment - replaced by TokenBlock
 /**
  * ✅ SONIOX PATTERN: Group tokens into blocks by speaker (simplified)
  * This follows the exact pattern from Soniox React Native example (renderer.tsx:18-43)
@@ -556,7 +406,7 @@ const groupTokensIntoBlocks = (tokens, speakerIdentities) => {
  * ✅ SONIOX PATTERN: Render a token block (replaces complex TranscriptSegment)
  * Simple component that shows speaker + time + tokens
  */
-const TokenBlock = ({ block, onSpeakerClick, enableSentimentAnalysis }) => {
+const TokenBlock = ({ block, onSpeakerClick }) => {
   const cleanSpeakerNumber =
     typeof block.speaker_number === 'string' ? block.speaker_number.replace(/^spk_/, '') : block.speaker_number;
 
@@ -600,9 +450,9 @@ const TokenBlock = ({ block, onSpeakerClick, enableSentimentAnalysis }) => {
         </SpaceBetween>
         {/* Render all tokens in this block */}
         <div style={{ display: 'inline' }}>
-          {block.tokens.map((token, tokenIdx) => (
+          {block.tokens.map((token) => (
             <span
-              key={`${block.id}-token-${tokenIdx}`}
+              key={`${block.id}-${token.start_ms}-${token.text.substring(0, 10)}`}
               style={{
                 color: token.is_final ? '#000000' : '#888888',
                 fontWeight: token.is_final ? 'normal' : '300',
@@ -621,12 +471,8 @@ const CallInProgressTranscript = ({
   item,
   callTranscriptPerCallId,
   autoScroll,
-  translateClient,
-  targetLanguage,
   agentTranscript,
-  translateOn,
   collapseSentiment,
-  enableSentimentAnalysis,
   speakerIdentities,
   onSpeakerClick,
 }) => {
@@ -635,10 +481,6 @@ const CallInProgressTranscript = ({
   const bottomRef = useRef();
   const containerRef = useRef();
   const [turnByTurnSegments, setTurnByTurnSegments] = useState([]);
-  const [translateCache, setTranslateCache] = useState({});
-  const [cacheSeen, setCacheSeen] = useState({});
-  const [lastUpdated, setLastUpdated] = useState(Date.now());
-  const [updateFlag, setUpdateFlag] = useState(false);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
   // ✅ Store tokens exactly like Soniox examples: accumulate final, replace non-final
   const [finalTokens, setFinalTokens] = useState([]);
@@ -781,380 +623,89 @@ const CallInProgressTranscript = ({
     }
   }, [lastMessage, isLiveCall, callId]);
 
-  const getSegments = () => {
-    const currentTurnByTurnSegments = transcriptChannels
-      .map((c) => {
-        const { segments } = transcriptsForThisCallId[c];
-        return segments;
-      })
-      // sort entries by end time
-      .reduce((p, c) => [...p, ...c].sort((a, b) => a.endTime - b.endTime), [])
-      .map((c) => {
-        const t = c;
-        return t;
-      });
-
-    return currentTurnByTurnSegments;
-  };
-
-  const updateTranslateCache = (seg) => {
-    const promises = [];
-    // prettier-ignore
-    for (let i = 0; i < seg.length; i += 1) {
-      const k = seg[i].segmentId.concat('-', targetLanguage);
-
-      // prettier-ignore
-      if (translateCache[k] === undefined) {
-        // Now call translate API
-        const params = {
-          Text: seg[i].transcript,
-          SourceLanguageCode: 'auto',
-          TargetLanguageCode: targetLanguage,
-        };
-        const command = new TranslateTextCommand(params);
-
-        logger.debug('Translate API being invoked for:', seg[i].transcript, targetLanguage);
-
-        promises.push(
-          translateClient.send(command).then(
-            (data) => {
-              const n = {};
-              logger.debug('Translate API response:', seg[i].transcript, targetLanguage, data.TranslatedText);
-              n[k] = { cacheId: k, transcript: seg[i].transcript, translated: data.TranslatedText };
-              return n;
-            },
-            (error) => {
-              logger.debug('Error from translate:', error);
-            },
-          ),
-        );
-      }
-    }
-    return promises;
-  };
-
-  // Translate all segments when the call is completed.
-  useEffect(() => {
-    if (translateOn && targetLanguage !== '' && item.recordingStatusLabel !== IN_PROGRESS_STATUS) {
-      const promises = updateTranslateCache(getSegments());
-      Promise.all(promises).then((results) => {
-        // prettier-ignore
-        if (results.length > 0) {
-          setTranslateCache((state) => ({
-            ...state,
-            ...results.reduce((a, b) => ({ ...a, ...b })),
-          }));
-          setUpdateFlag((state) => !state);
-        }
-      });
-    }
-  }, [targetLanguage, agentTranscript, translateOn, item.recordingStatusLabel]);
-
-  // Translate real-time segments when the call is in progress.
-  useEffect(async () => {
-    const c = getSegments();
-    // prettier-ignore
-    if (
-      translateOn
-      && targetLanguage !== ''
-      && c.length > 0
-      && item.recordingStatusLabel === IN_PROGRESS_STATUS
-    ) {
-      const k = c[c.length - 1].segmentId.concat('-', targetLanguage);
-      const n = {};
-      if (c[c.length - 1].isPartial === false && cacheSeen[k] === undefined) {
-        n[k] = { seen: true };
-        setCacheSeen((state) => ({
-          ...state,
-          ...n,
-        }));
-
-        // prettier-ignore
-        if (translateCache[k] === undefined) {
-          // Now call translate API
-          const params = {
-            Text: c[c.length - 1].transcript,
-            SourceLanguageCode: 'auto',
-            TargetLanguageCode: targetLanguage,
-          };
-          const command = new TranslateTextCommand(params);
-
-          logger.debug('Translate API being invoked for:', c[c.length - 1].transcript, targetLanguage);
-
-          try {
-            const data = await translateClient.send(command);
-            const o = {};
-            logger.debug('Translate API response:', c[c.length - 1].transcript, data.TranslatedText);
-            o[k] = {
-              cacheId: k,
-              transcript: c[c.length - 1].transcript,
-              translated: data.TranslatedText,
-            };
-            setTranslateCache((state) => ({
-              ...state,
-              ...o,
-            }));
-          } catch (error) {
-            logger.debug('Error from translate:', error);
-          }
-        }
-      }
-      if (Date.now() - lastUpdated > 500) {
-        setUpdateFlag((state) => !state);
-        logger.debug('Updating turn by turn with latest cache');
-      }
-    }
-    setLastUpdated(Date.now());
-  }, [callTranscriptPerCallId]);
+  // ✅ SONIOX PATTERN: Translation removed for simplicity
+  // Can be re-added later if needed using token-level translation
 
   const getTurnByTurnSegments = () => {
-    console.log('🔍 [RENDER] getTurnByTurnSegments called');
+    console.log('🔍 [RENDER - SONIOX PATTERN] getTurnByTurnSegments called');
     console.log('  Final tokens:', finalTokens.length);
     console.log('  Non-final tokens:', nonFinalTokens.length);
 
-    // ✅ Combine all tokens with deduplication (prefer final over non-final)
-    // Create a Map with unique key: speaker + start_ms + text (first 20 chars)
-    const tokenMap = new Map();
-
-    // Add non-final tokens first
-    nonFinalTokens.forEach((token) => {
-      if (token.text && token.start_ms != null) {
-        const textPrefix = token.text.trim().substring(0, 20);
-        const key = `${token.speaker || '1'}-${token.start_ms}-${textPrefix}`;
-        tokenMap.set(key, token);
-      }
-    });
-
-    // Add final tokens (will overwrite non-final if duplicate)
-    finalTokens.forEach((token) => {
-      if (token.text && token.start_ms != null) {
-        const textPrefix = token.text.trim().substring(0, 20);
-        const key = `${token.speaker || '1'}-${token.start_ms}-${textPrefix}`;
-        tokenMap.set(key, token);
-      }
-    });
-
-    const allLiveTokens = Array.from(tokenMap.values());
-
-    // Sort by start_ms to ensure correct order
+    // ✅ STEP 1: Combine live tokens (like Soniox: [...finalTokens, ...nonFinalTokens])
+    const allLiveTokens = [...finalTokens, ...nonFinalTokens];
     allLiveTokens.sort((a, b) => a.start_ms - b.start_ms);
 
-    console.log(
-      `  📦 Combined to ${allLiveTokens.length} unique tokens (deduped from ${
-        finalTokens.length + nonFinalTokens.length
-      })`,
-    );
-
-    // 🐛 Debug: Log tokens with end_ms issues
-    allLiveTokens.forEach((token, idx) => {
-      if (token.end_ms == null || token.end_ms === 0 || token.end_ms <= token.start_ms) {
-        console.warn(
-          `  ⚠️ Token[${idx}] has invalid end_ms: start=${token.start_ms}, end=${
-            token.end_ms
-          }, text="${token.text.substring(0, 30)}..."`,
-        );
-      }
-    });
-
-    // Convert tokens to segments
-    const liveTokenSegments = [];
-    let currentSegment = null;
-
-    // ✅ Group tokens into segments by speaker (like Soniox: only when speaker/language changes)
-    allLiveTokens.forEach((token) => {
-      // Skip tokens without text or invalid timestamps
-      if (!token.text || typeof token.start_ms !== 'number' || token.start_ms < 0) {
-        return;
-      }
-
-      const speaker = token.speaker || '1';
-      // ✅ Like Soniox: only create new segment when speaker changes (no time gap check)
-      const shouldStartNewSegment = !currentSegment || currentSegment.speaker_number !== speaker;
-
-      if (shouldStartNewSegment) {
-        // Save previous segment
-        if (currentSegment) {
-          liveTokenSegments.push(currentSegment);
-        }
-        // Start new segment
-        const channel = speaker === '1' ? 'AGENT' : 'CALLER';
-        const startTime = token.start_ms / 1000;
-        // ✅ Ensure endTime > startTime ALWAYS: use end_ms ONLY if > start_ms
-        let endTime;
-        if (token.end_ms != null && typeof token.end_ms === 'number' && token.end_ms > token.start_ms) {
-          endTime = token.end_ms / 1000;
-        } else {
-          // Estimate: final tokens ~0.5s, non-final ~1s (NEVER use 0)
-          const duration = token.is_final ? 0.5 : 1.0;
-          endTime = startTime + duration;
-        }
-
-        currentSegment = {
-          transcript: token.text,
-          tokens: [token],
-          speaker_number: speaker,
-          speaker: channel,
-          channel,
-          startTime,
-          endTime,
-          isPartial: !token.is_final,
-          segmentId: `live-${speaker}-${token.start_ms}`,
-          createdAt: new Date().toISOString(),
-          isLiveToken: true, // ✅ Flag to identify live tokens
-        };
-      } else {
-        // Append to current segment
-        currentSegment.transcript += token.text;
-        currentSegment.tokens.push(token);
-        // ✅ Update endTime: always ensure it moves forward AND never becomes 0
-        if (token.end_ms != null && typeof token.end_ms === 'number' && token.end_ms > token.start_ms) {
-          currentSegment.endTime = Math.max(currentSegment.endTime, token.end_ms / 1000);
-        } else {
-          // Estimate based on token duration (NEVER allow 0)
-          const duration = token.is_final ? 0.5 : 1.0;
-          const estimatedEnd = token.start_ms / 1000 + duration;
-          currentSegment.endTime = Math.max(currentSegment.endTime, estimatedEnd);
-        }
-        currentSegment.isPartial = currentSegment.isPartial || !token.is_final;
-      }
-    });
-
-    // Save the last segment
-    if (currentSegment) {
-      liveTokenSegments.push(currentSegment);
-    }
-
-    console.log(`📊 Created ${liveTokenSegments.length} segments from ${allLiveTokens.length} tokens`);
-
-    // Get database segments
-    const databaseSegments = transcriptChannels
+    // ✅ STEP 2: Get database segments and convert to token format
+    const databaseTokens = transcriptChannels
       .map((c) => {
         const { segments } = transcriptsForThisCallId[c];
-        return segments;
+        return segments || [];
       })
       .reduce((p, c) => [...p, ...c], [])
-      .sort((a, b) => a.startTime - b.startTime);
-
-    const hasLiveTokens = liveTokenSegments.length > 0;
-    const hasDatabaseSegments = databaseSegments.length > 0;
-
-    console.log('🔍 [DEBUG SEGMENTS]');
-    console.log('  Live token segments:', liveTokenSegments.length);
-    console.log('  Database segments:', databaseSegments.length);
-
-    // ✅ For in-progress calls: Show BOTH database + live tokens (merged by time)
-    // ✅ For completed calls: Show database only
-    let allSegments = [];
-    if (hasLiveTokens && hasDatabaseSegments) {
-      // Merge database + live, but DEDUPLICATE to avoid showing same content twice
-      console.log('  Using: DATABASE + LIVE TOKENS (MERGED WITH DEDUPLICATION)');
-
-      // ✅ Create a Set of database time ranges for fast lookup (overlap detection)
-      const databaseTimeRanges = databaseSegments.map((seg) => ({
-        speaker: seg.speaker_number,
-        start: seg.startTime,
-        end: seg.endTime,
+      .sort((a, b) => a.startTime - b.startTime)
+      .map((seg) => ({
+        // Convert database segment to token format
+        text: seg.transcript,
+        speaker: seg.speaker_number || '1',
+        speaker_number: seg.speaker_number,
+        start_ms: seg.startTime * 1000,
+        end_ms: seg.endTime * 1000,
+        is_final: !seg.isPartial,
+        channel: seg.channel,
+        _isDbSegment: true, // Flag to identify database segments
+        _originalSegment: seg, // Keep original for sentiment/metadata
       }));
 
-      // Only add live tokens that don't overlap with database segments
-      const uniqueLiveTokens = liveTokenSegments.filter((liveSeg) => {
-        // Check if this live segment overlaps with any database segment (same speaker + time overlap)
-        const hasOverlap = databaseTimeRanges.some((dbRange) => {
-          if (dbRange.speaker !== liveSeg.speaker_number) return false;
-          // Check time overlap: segments overlap if one starts before the other ends
-          const overlaps = liveSeg.startTime < dbRange.end && liveSeg.endTime > dbRange.start;
-          return overlaps;
-        });
+    console.log('  Database tokens (converted from segments):', databaseTokens.length);
 
-        if (hasOverlap) {
-          console.log(
-            `  🚫 Skipping overlapping live token: Speaker ${liveSeg.speaker_number} [${liveSeg.startTime.toFixed(
-              1,
-            )}s-${liveSeg.endTime.toFixed(1)}s] "${liveSeg.transcript.substring(0, 30)}..."`,
-          );
-        }
-        return !hasOverlap;
-      });
+    // ✅ STEP 3: Merge live + database tokens with deduplication
+    const allTokens = [];
+    const seenKeys = new Set();
 
-      console.log(`  Kept ${uniqueLiveTokens.length}/${liveTokenSegments.length} unique live tokens`);
-      allSegments = [...databaseSegments, ...uniqueLiveTokens].sort((a, b) => a.startTime - b.startTime);
-    } else if (hasLiveTokens) {
-      console.log('  Using: LIVE TOKENS ONLY');
-      allSegments = liveTokenSegments;
-    } else {
-      console.log('  Using: DATABASE ONLY');
-      allSegments = databaseSegments;
-    }
+    // Add database tokens first
+    databaseTokens.forEach((token) => {
+      const key = `${token.speaker}-${token.start_ms}`;
+      if (!seenKeys.has(key)) {
+        allTokens.push(token);
+        seenKeys.add(key);
+      }
+    });
 
-    console.log('  Total segments to render:', allSegments.length);
+    // Add live tokens (skip if overlaps with database)
+    allLiveTokens.forEach((token) => {
+      const key = `${token.speaker || '1'}-${token.start_ms}`;
+      if (!seenKeys.has(key)) {
+        allTokens.push(token);
+      }
+    });
 
-    const currentTurnByTurnSegments = allSegments
-      .reduce((accumulator, current) => {
-        // ✅ Only merge LIVE tokens (database segments are already properly separated)
-        const previous = accumulator.length > 0 ? accumulator[accumulator.length - 1] : null;
+    // Sort all tokens by time
+    allTokens.sort((a, b) => a.start_ms - b.start_ms);
 
-        // prettier-ignore
-        // ✅ Merge consecutive segments from same speaker
-        // For live tokens: merge all from same speaker (Soniox pattern)
-        // For database: merge only if both are database (already properly grouped)
-        const bothAreLive = previous.isLiveToken && current.isLiveToken;
-        const bothAreDatabase = !previous.isLiveToken && !current.isLiveToken;
-        
-        const shouldMerge =
-          previous &&
-          shouldAppendToPreviousSegment({ previous, current }) &&
-          !translateOn &&
-          (bothAreLive || bothAreDatabase); // Merge if both are same type
+    console.log(
+      `  Total tokens to render: ${allTokens.length} (${databaseTokens.length} DB + ${allLiveTokens.length} live)`,
+    );
 
-        if (!shouldMerge) {
-          accumulator.push({ ...current });
-        } else {
-          appendToPreviousSegment({ previous: accumulator[accumulator.length - 1], current });
-        }
-        return accumulator;
-      }, [])
-      .map((c) => {
-        const t = c;
-        t.agentTranscript = agentTranscript;
-        t.targetLanguage = targetLanguage;
-        t.translateOn = translateOn;
-        // In streaming audio the speaker will just be "Other participant", override this with the
-        // name the user chose if needed
-        if (t.speaker === DEFAULT_OTHER_SPEAKER_NAME || t.speaker === '') {
-          t.speaker = item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
-        }
-        // ✅ Clean up internal flag
-        delete t.isLiveToken;
+    // ✅ STEP 4: Group tokens into blocks by speaker (SONIOX PATTERN)
+    const blocks = groupTokensIntoBlocks(allTokens, speakerIdentities);
 
-        return t;
-      })
-      .map(
-        // prettier-ignore
-        (s) => {
-          return (
-            s?.segmentId
-            && s?.createdAt
-            && (s.agentTranscript === undefined
-              || s.agentTranscript || s.channel !== 'AGENT')
-            && (s.channel !== 'AGENT_VOICETONE')
-            && (s.channel !== 'CALLER_VOICETONE')
-            && (s.channel !== 'CHAT_ASSISTANT')
-            && <TranscriptSegment
-              key={`${s.segmentId}-${s.createdAt}`}
-              segment={s}
-              translateCache={translateCache}
-              enableSentimentAnalysis={enableSentimentAnalysis}
-              participantName={item.callerPhoneNumber}
-              onSpeakerClick={onSpeakerClick}
-              speakerIdentities={speakerIdentities}
-            />
-          );
-        },
-      );
+    console.log(`  Grouped into ${blocks.length} speaker blocks`);
 
-    // this element is used for scrolling to bottom and to provide padding
-    currentTurnByTurnSegments.push(<div key="bottom" ref={bottomRef} />);
-    return currentTurnByTurnSegments;
+    // ✅ STEP 5: Render blocks as components
+    const renderedBlocks = blocks
+      .filter(
+        (block) =>
+          (agentTranscript === undefined || agentTranscript || block.channel !== 'AGENT') &&
+          block.channel !== 'AGENT_VOICETONE' &&
+          block.channel !== 'CALLER_VOICETONE' &&
+          block.channel !== 'CHAT_ASSISTANT',
+      )
+      .map((block) => <TokenBlock key={block.id} block={block} onSpeakerClick={onSpeakerClick} />);
+
+    // Add bottom padding element for auto-scroll
+    renderedBlocks.push(<div key="bottom" ref={bottomRef} />);
+
+    return renderedBlocks;
   };
 
   // Smooth scroll to bottom function
@@ -1189,10 +740,7 @@ const CallInProgressTranscript = ({
   }, [
     callTranscriptPerCallId,
     item.recordingStatusLabel,
-    targetLanguage,
     agentTranscript,
-    translateOn,
-    updateFlag,
     speakerIdentities,
     finalTokens,
     nonFinalTokens,
@@ -1320,12 +868,8 @@ const getTranscriptContent = ({
   item,
   callTranscriptPerCallId,
   autoScroll,
-  translateClient,
-  targetLanguage,
   agentTranscript,
-  translateOn,
   collapseSentiment,
-  enableSentimentAnalysis,
   speakerIdentities,
   onSpeakerClick,
 }) => {
@@ -1338,12 +882,8 @@ const getTranscriptContent = ({
           item={item}
           callTranscriptPerCallId={callTranscriptPerCallId}
           autoScroll={autoScroll}
-          translateClient={translateClient}
-          targetLanguage={targetLanguage}
           agentTranscript={agentTranscript}
-          translateOn={translateOn}
           collapseSentiment={collapseSentiment}
-          enableSentimentAnalysis={enableSentimentAnalysis}
           speakerIdentities={speakerIdentities}
           onSpeakerClick={onSpeakerClick}
         />
@@ -1355,45 +895,20 @@ const CallTranscriptContainer = ({
   setToolsOpen,
   item,
   callTranscriptPerCallId,
-  translateClient,
   collapseSentiment,
-  enableSentimentAnalysis,
   speakerIdentities,
   onSpeakerClick,
 }) => {
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
   const [autoScrollDisabled, setAutoScrollDisabled] = useState(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
   const [showDownloadTranscript, setShowDownloadTranscripts] = useState(item.recordingStatusLabel === DONE_STATUS);
-
-  const [translateOn, setTranslateOn] = useState(false);
-  const [targetLanguage, setTargetLanguage] = useState(localStorage.getItem('targetLanguage') || '');
   const [agentTranscript] = useState(true);
-
-  const handleLanguageSelect = (event) => {
-    setTargetLanguage(event.target.value);
-    localStorage.setItem('targetLanguage', event.target.value);
-  };
 
   useEffect(() => {
     setAutoScrollDisabled(item.recordingStatusLabel !== IN_PROGRESS_STATUS);
     setAutoScroll(item.recordingStatusLabel === IN_PROGRESS_STATUS);
     setShowDownloadTranscripts(item.recordingStatusLabel === DONE_STATUS);
   }, [item.recordingStatusLabel]);
-
-  const languageChoices = () => {
-    if (translateOn) {
-      return (
-        // prettier-ignore
-        // eslint-disable-jsx-a11y/control-has-associated-label
-        <div>
-          <select value={targetLanguage} onChange={handleLanguageSelect}>
-            {LANGUAGE_CODES.map(({ value, label }) => <option value={value}>{label}</option>)}
-          </select>
-        </div>
-      );
-    }
-    return translateOn;
-  };
 
   const downloadTranscript = (option) => {
     console.log('option', option);
@@ -1439,9 +954,10 @@ const CallTranscriptContainer = ({
                     disabled={autoScrollDisabled}
                   />
                   <span>Auto Scroll</span>
-                  <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} />
-                  <span>Enable Translation</span>
-                  {languageChoices()}
+                  {/* Translation temporarily disabled in Soniox pattern - can be re-added */}
+                  {/* <Toggle onChange={({ detail }) => setTranslateOn(detail.checked)} checked={translateOn} /> */}
+                  {/* <span>Enable Translation</span> */}
+                  {/* {languageChoices()} */}
                   {showDownloadTranscript && (
                     <SpaceBetween direction="horizontal" size="xs">
                       <ButtonDropdown
@@ -1475,12 +991,8 @@ const CallTranscriptContainer = ({
           item,
           callTranscriptPerCallId,
           autoScroll,
-          translateClient,
-          targetLanguage,
           agentTranscript,
-          translateOn,
           collapseSentiment,
-          enableSentimentAnalysis,
           speakerIdentities,
           onSpeakerClick,
         })}
@@ -1621,7 +1133,7 @@ const CallStatsContainer = ({ item, callTranscriptPerCallId, collapseSentiment, 
 );
 
 export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCallDetailsFromCallIds }) => {
-  const { currentCredentials } = useAppContext();
+  // const { currentCredentials } = useAppContext(); // Not needed without translation
 
   const { settings } = useSettingsContext();
   const [collapseSentiment, setCollapseSentiment] = useState(false);
@@ -1665,20 +1177,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     }
   };
 
-  // ✅ Using Gemini for translation instead of AWS Translate
-  let translateClient = new GeminiTranslateClient({
-    maxAttempts: MAXIMUM_ATTEMPTS,
-  });
-
-  /* Get a client with refreshed credentials. Credentials can go stale when user is logged in
-     for an extended period.
-   */
-  useEffect(() => {
-    logger.debug('Translate client initialized with Gemini');
-    translateClient = new GeminiTranslateClient({
-      maxAttempts: MAXIMUM_ATTEMPTS,
-    });
-  }, [currentCredentials]);
+  // Translation temporarily disabled in Soniox pattern
+  // const translateClient = new GeminiTranslateClient({ maxAttempts: MAXIMUM_ATTEMPTS });
 
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
@@ -1832,9 +1332,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           item={item}
           setToolsOpen={setToolsOpen}
           callTranscriptPerCallId={callTranscriptPerCallId}
-          translateClient={translateClient}
           collapseSentiment={collapseSentiment}
-          enableSentimentAnalysis={enableSentimentAnalysis}
           speakerIdentities={speakerIdentities}
           onSpeakerClick={handleSpeakerClick}
         />
