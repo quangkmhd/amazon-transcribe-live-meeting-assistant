@@ -140,7 +140,8 @@ export const startSonioxTranscription = async (
                     event: 'TOKENS',
                     callId: callMetaData.callId,
                     tokens: result.tokens.map((t: any) => ({
-                        text: t.text,
+                        // ✅ Clean text: remove <end> tags
+                        text: t.text ? t.text.replace(/<end>/g, '').replace(/<\/end>/g, '') : '',
                         speaker: t.speaker || '1',
                         is_final: t.is_final,
                         start_ms: t.start_ms,
@@ -203,7 +204,13 @@ export const startSonioxTranscription = async (
                                 speakerNumber
                             );
                             
-                            const finalText = tokens.map((t: any) => t.text).join('');
+                            // ✅ Clean transcript: remove <end> tags and other special markers
+                            const finalText = tokens
+                                .map((t: any) => t.text)
+                                .join('')
+                                .replace(/<end>/g, '')
+                                .replace(/<\/end>/g, '');
+                            
                             pipelineLogger.logSTTFinal(
                                 callMetaData.callId,
                                 finalText,
@@ -213,9 +220,7 @@ export const startSonioxTranscription = async (
 
                             const transcriptData = {
                                 meeting_id: callMetaData.callId,
-                                transcript: tokens
-                                    .map((t: any) => t.text)
-                                    .join(''),
+                                transcript: finalText,
                                 speaker_number: speakerNumber,
                                 speaker_name: speakerName || undefined,
                                 channel: mapSpeakerToChannel(speakerNumber),

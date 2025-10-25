@@ -23,7 +23,7 @@ const logger = {
 
 const App = () => {
   const supabaseConfig = useSupabaseConfig();
-  const { authState, user } = useUserAuthStateSupabase();
+  const { authState, user, isLoading } = useUserAuthStateSupabase();
   const { currentSession, currentCredentials } = useCurrentSessionCreds({ authState });
   const [errorMessage, setErrorMessage] = useState();
   const [navigationOpen, setNavigationOpen] = useState(true);
@@ -40,6 +40,7 @@ const App = () => {
     user,
     navigationOpen,
     setNavigationOpen,
+    isLoading,
   };
   logger.debug('appContextValue', appContextValue);
 

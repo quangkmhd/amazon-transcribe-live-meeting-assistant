@@ -25,9 +25,11 @@ class RecordingProcessor extends AudioWorkletProcessor {
     const length = left16Bit.length + right16Bit.length;
     const interleaved = new Int16Array(length);
 
-    for (let i = 0, j = 0; i < length; j += 1) {
-      interleaved[(i += 1)] = left16Bit[j];
-      interleaved[(i += 1)] = right16Bit[j];
+    // Properly interleave stereo channels: L, R, L, R, ...
+    for (let i = 0, j = 0; j < left16Bit.length; j += 1) {
+      interleaved[i] = left16Bit[j];   // Left channel at even indices
+      interleaved[i + 1] = right16Bit[j]; // Right channel at odd indices
+      i += 2;
     }
 
     return interleaved;

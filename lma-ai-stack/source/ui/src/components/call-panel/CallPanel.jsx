@@ -65,8 +65,6 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]
 const MAXIMUM_ATTEMPTS = 100;
 const MAXIMUM_RETRY_DELAY = 1000;
 
-const PAUSE_TO_MERGE_IN_SECONDS = 1;
-
 /* eslint-disable react/prop-types, react/destructuring-assignment */
 const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
   const { calls } = useCallsContext();
@@ -502,9 +500,7 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
  * user experience. The conditions for merge are:
  * - Same speaker
  * - Same channel
- * - The gap between two segments is less than PAUSE_TO_MERGE_IN_SECONDS second
- * - Add language code check if available
- * TODO: Check language code once it is returned
+ * - Group all consecutive messages from the same speaker regardless of time gap
  * @param previous previous segment
  * @param current current segment
  * @returns {boolean} indicates whether to merge or not
@@ -513,8 +509,7 @@ const shouldAppendToPreviousSegment = ({ previous, current }) =>
   // prettier-ignore
   // eslint-disable-next-line implicit-arrow-linebreak
   previous.speaker === current.speaker
-  && previous.channel === current.channel
-  && current.startTime - previous.endTime < PAUSE_TO_MERGE_IN_SECONDS;
+  && previous.channel === current.channel;
 
 /**
  * Append current segment to its previous segment
@@ -654,10 +649,11 @@ const CallInProgressTranscript = ({
             Object.entries(newFinalBySpeaker).forEach(([speaker, tokens]) => {
               const previousCount = (prev[speaker] || []).length;
               const existingTokens = prev[speaker] || [];
-              // Create a Set of existing token identifiers for fast lookup
-              const existingIds = new Set(existingTokens.map((t) => `${t.start_ms}-${t.end_ms}-${t.text}`));
-              // Only add tokens that don't already exist
-              const newUniqueTokens = tokens.filter((t) => !existingIds.has(`${t.start_ms}-${t.end_ms}-${t.text}`));
+              // Create a Set of existing token start times for fast lookup
+              // ✅ Use ONLY start_ms as key because it never changes, even when token becomes final
+              const existingStartTimes = new Set(existingTokens.map((t) => t.start_ms));
+              // Only add tokens that don't already exist (based on start_ms)
+              const newUniqueTokens = tokens.filter((t) => !existingStartTimes.has(t.start_ms));
               updated[speaker] = [...existingTokens, ...newUniqueTokens];
               console.log(
                 `  ✅ Speaker ${speaker}: ${previousCount} → ${updated[speaker].length} final tokens (${newUniqueTokens.length} new)`,
@@ -869,6 +865,12 @@ const CallInProgressTranscript = ({
     let currentSegment = null;
 
     allTokensWithSpeaker.forEach((token) => {
+      // ✅ Skip tokens with invalid timestamps (allow 0 as valid start time)
+      if (typeof token.start_ms !== 'number' || token.start_ms < 0) {
+        console.warn(`⚠️ Skipping token with invalid start_ms:`, token);
+        return;
+      }
+
       const shouldStartNewSegment = !currentSegment || currentSegment.speaker_number !== token.speaker;
       if (shouldStartNewSegment) {
         // Save previous segment
@@ -877,6 +879,8 @@ const CallInProgressTranscript = ({
         }
         // Start new segment
         const channel = token.speaker === '1' ? 'AGENT' : 'CALLER';
+        // ✅ Use end_ms if available, otherwise use start_ms as fallback
+        const endTime = token.end_ms && token.end_ms > 0 ? token.end_ms / 1000 : token.start_ms / 1000;
         currentSegment = {
           transcript: token.text,
           tokens: [token],
@@ -884,7 +888,7 @@ const CallInProgressTranscript = ({
           speaker: channel,
           channel,
           startTime: token.start_ms / 1000,
-          endTime: token.end_ms / 1000,
+          endTime,
           isPartial: !token.is_final,
           // ✅ Use start_ms as unique identifier (never changes for this segment)
           segmentId: `live-${token.speaker}-${token.start_ms}`,
@@ -894,7 +898,10 @@ const CallInProgressTranscript = ({
         // Append to current segment
         currentSegment.transcript += token.text;
         currentSegment.tokens.push(token);
-        currentSegment.endTime = token.end_ms / 1000;
+        // ✅ Update endTime only if token has valid end_ms
+        if (token.end_ms && token.end_ms > 0) {
+          currentSegment.endTime = token.end_ms / 1000;
+        }
         currentSegment.isPartial = currentSegment.isPartial || !token.is_final;
         // ✅ DON'T override segmentId - keep the original one based on start_ms
       }
@@ -935,9 +942,26 @@ const CallInProgressTranscript = ({
     // ✅ For completed calls: Show database only
     let allSegments = [];
     if (hasLiveTokens && hasDatabaseSegments) {
-      // Merge database + live, sort by time
-      console.log('  Using: DATABASE + LIVE TOKENS (MERGED)');
-      allSegments = [...databaseSegments, ...liveTokenSegments].sort((a, b) => a.startTime - b.startTime);
+      // Merge database + live, but DEDUPLICATE to avoid showing same content twice
+      console.log('  Using: DATABASE + LIVE TOKENS (MERGED WITH DEDUPLICATION)');
+
+      // Create a Set of database transcript content for fast lookup
+      const databaseTranscriptSet = new Set(
+        databaseSegments.map((seg) => `${seg.speaker_number}-${seg.transcript.trim()}`),
+      );
+
+      // Only add live tokens that don't already exist in database
+      const uniqueLiveTokens = liveTokenSegments.filter((liveSeg) => {
+        const key = `${liveSeg.speaker_number}-${liveSeg.transcript.trim()}`;
+        const isDuplicate = databaseTranscriptSet.has(key);
+        if (isDuplicate) {
+          console.log(`  🚫 Skipping duplicate live token: "${liveSeg.transcript.substring(0, 30)}..."`);
+        }
+        return !isDuplicate;
+      });
+
+      console.log(`  Kept ${uniqueLiveTokens.length}/${liveTokenSegments.length} unique live tokens`);
+      allSegments = [...databaseSegments, ...uniqueLiveTokens].sort((a, b) => a.startTime - b.startTime);
     } else if (hasLiveTokens) {
       console.log('  Using: LIVE TOKENS ONLY');
       allSegments = liveTokenSegments;

@@ -242,7 +242,7 @@ const StreamAudio = () => {
       SOURCE_SAMPLING_RATE = audioContext.current.sampleRate;
 
       recordingCallMetaData.samplingRate = SOURCE_SAMPLING_RATE;
-      recordingCallMetaData.channels = 2; // Stereo: channel 0 = mic, channel 1 = display audio
+      recordingCallMetaData.channels = 2; // Stereo: channel 0 = display audio, channel 1 = mic
       recordingCallMetaData.callEvent = 'START';
 
       // eslint-disable-next-line prettier/prettier
@@ -286,9 +286,17 @@ const StreamAudio = () => {
       const monoDisplaySource = convertToMono(displayAudioSource.current);
       const monoMicSource = convertToMono(micAudioSource.current);
 
+      // ✅ Mix both audio sources together and output to BOTH ears (stereo)
+      // This ensures users hear BOTH browser and mic audio in both left and right channels
       channelMerger.current = audioContext.current.createChannelMerger(2);
-      monoMicSource.connect(channelMerger.current, 0, 0);
-      monoDisplaySource.connect(channelMerger.current, 0, 1);
+
+      // Connect display audio to BOTH channels (left and right)
+      monoDisplaySource.connect(channelMerger.current, 0, 0); // Display audio -> Channel 0 (Left)
+      monoDisplaySource.connect(channelMerger.current, 0, 1); // Display audio -> Channel 1 (Right)
+
+      // Connect mic audio to BOTH channels (left and right)
+      monoMicSource.connect(channelMerger.current, 0, 0); // Mic audio -> Channel 0 (Left)
+      monoMicSource.connect(channelMerger.current, 0, 1); // Mic audio -> Channel 1 (Right)
 
       console.log(`
         DEBUG - [${new Date().toISOString()}]: Registering and adding AudioWorklet processor to capture audio

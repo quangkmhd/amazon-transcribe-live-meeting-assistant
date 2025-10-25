@@ -14,6 +14,7 @@ const logger = {
 const useUserAuthStateSupabase = () => {
   const [authState, setAuthState] = useState();
   const [user, setUser] = useState();
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     // Get initial session
@@ -49,6 +50,7 @@ const useUserAuthStateSupabase = () => {
         setAuthState('signedout');
         setUser(null);
       }
+      setIsLoading(false);
     });
 
     // Listen for auth changes
@@ -94,7 +96,7 @@ const useUserAuthStateSupabase = () => {
     };
   }, []);
 
-  return { authState, user };
+  return { authState, user, isLoading };
 };
 
 export default useUserAuthStateSupabase;
