@@ -572,12 +572,27 @@ const CallInProgressTranscript = ({
     user?.signInUserSession?.refreshToken?.jwtToken || localStorage.getItem('supabase-client-refreshtoken') || '';
 
   // Accept both display label ('In Progress') AND database status ('started')
-  const isLiveCall = item.recordingStatusLabel === IN_PROGRESS_STATUS || item.status?.toLowerCase?.() === 'started';
+  // ALSO handle refresh case: if meeting started recently (within 1 hour), treat as live
+  const now = Date.now();
+  const startedAt = item.initiationTimeStamp ? new Date(item.initiationTimeStamp).getTime() : 0;
+  const timeSinceStart = now - startedAt;
+  const ONE_HOUR = 60 * 60 * 1000;
+  const isRecentlyStarted = timeSinceStart < ONE_HOUR;
+  // Check for explicit ENDED status (from database mapping)
+  const hasExplicitEndStatus = item.recordingStatusLabel === DONE_STATUS || item.recordingStatusLabel === 'Error';
+
+  const isLiveCall =
+    item.recordingStatusLabel === IN_PROGRESS_STATUS ||
+    item.status?.toLowerCase?.() === 'started' ||
+    (isRecentlyStarted && !hasExplicitEndStatus); // ✅ Handle refresh case
 
   console.log('🔌 [WEBSOCKET DEBUG]');
   console.log('  Database status:', item.status);
   console.log('  Display label:', item.recordingStatusLabel);
-  console.log('  Expected:', IN_PROGRESS_STATUS, 'OR', 'started');
+  console.log('  Initiation timestamp:', item.initiationTimeStamp);
+  console.log('  Time since start:', `${Math.floor(timeSinceStart / 1000)}s`);
+  console.log('  Is recently started:', isRecentlyStarted);
+  console.log('  Has explicit end status:', hasExplicitEndStatus);
   console.log('  isLiveCall:', isLiveCall);
   console.log('  WSEndpoint:', settings.WSEndpoint);
   console.log('  Has JWT_TOKEN:', !!JWT_TOKEN);
