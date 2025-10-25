@@ -74,7 +74,12 @@ export const MeetingsQueryLayout = () => {
 
   const scrollToBottomOfChat = async () => {
     const chatDiv = await getElementByIdAsync('chatDiv');
-    chatDiv.scrollTop = chatDiv.scrollHeight + 200;
+    requestAnimationFrame(() => {
+      chatDiv.scrollTo({
+        top: chatDiv.scrollHeight + 200,
+        behavior: 'smooth',
+      });
+    });
   };
 
   const getMeetingsQueryResponseFromKB = async (input, sessionId) => {
@@ -157,7 +162,17 @@ export const MeetingsQueryLayout = () => {
         </form>
       }
     >
-      <div id="chatDiv" style={{ overflow: 'hidden', overflowY: 'auto', height: '30em' }}>
+      <div
+        id="chatDiv"
+        style={{
+          overflow: 'hidden',
+          overflowY: 'auto',
+          height: '30em',
+          scrollBehavior: 'smooth',
+          willChange: 'scroll-position',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
         <SpaceBetween size="m">
           {meetingKbQueries.length > 0 ? (
             meetingKbQueries.map((entry, i) => (

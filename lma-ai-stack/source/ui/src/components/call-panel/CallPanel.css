@@ -1,5 +1,9 @@
 .transcript-box {
     overflow-y: auto;
+    scroll-behavior: smooth;
+    /* Performance optimization for smooth scrolling */
+    will-change: scroll-position;
+    -webkit-overflow-scrolling: touch;
 }
 
 .transcript-segment {

@@ -555,6 +555,7 @@ const CallInProgressTranscript = ({
   const [finalTokensBySpeaker, setFinalTokensBySpeaker] = useState({});
   const [nonFinalTokensBySpeaker, setNonFinalTokensBySpeaker] = useState({});
   const [tokenUpdateCounter, setTokenUpdateCounter] = useState(0); // Force re-render trigger
+  const scrollTimeoutRef = useRef(null); // For debouncing scroll
 
   // channels: AGENT, AGENT_ASSIST, CALLER, CATEGORY_MATCH,
   // AGENT_VOICETONE, CALLER_VOICETONE
@@ -1005,6 +1006,21 @@ const CallInProgressTranscript = ({
     return currentTurnByTurnSegments;
   };
 
+  // Smooth scroll to bottom function
+  const scrollToBottom = (behavior = 'smooth') => {
+    if (containerRef.current) {
+      // Use requestAnimationFrame for smoother rendering
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTo({
+            top: containerRef.current.scrollHeight,
+            behavior,
+          });
+        }
+      });
+    }
+  };
+
   // Detect when user manually scrolls
   const handleScroll = (e) => {
     const container = e.target;
@@ -1032,25 +1048,30 @@ const CallInProgressTranscript = ({
     tokenUpdateCounter, // Trigger re-render when tokens update
   ]);
 
+  // Auto-scroll effect with debouncing for smooth experience
   useEffect(() => {
-    // prettier-ignore
-    if (
-      item.recordingStatusLabel === IN_PROGRESS_STATUS
-      && autoScroll
-      && !userHasScrolled
-      && bottomRef.current?.scrollIntoView
-    ) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Clear any pending scroll timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
     }
-  }, [
-    turnByTurnSegments,
-    autoScroll,
-    userHasScrolled,
-    item.recordingStatusLabel,
-    targetLanguage,
-    agentTranscript,
-    translateOn,
-  ]);
+
+    // Only auto-scroll if conditions are met
+    // prettier-ignore
+    if (item.recordingStatusLabel === IN_PROGRESS_STATUS && autoScroll && !userHasScrolled) {
+      // Debounce scroll to prevent thrashing (smooth out rapid updates)
+      scrollTimeoutRef.current = setTimeout(() => {
+        scrollToBottom('smooth');
+      }, 50); // Small delay to batch rapid updates
+    }
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+    // prettier-ignore
+  }, [turnByTurnSegments, autoScroll, userHasScrolled, item.recordingStatusLabel]);
 
   return (
     <div
@@ -1062,6 +1083,9 @@ const CallInProgressTranscript = ({
         paddingLeft: '10px',
         paddingTop: '5px',
         paddingRight: '10px',
+        scrollBehavior: 'smooth',
+        willChange: 'scroll-position',
+        WebkitOverflowScrolling: 'touch',
       }}
     >
       {/* Visual indicator when auto-scroll is paused */}
@@ -1085,7 +1109,7 @@ const CallInProgressTranscript = ({
             <Button
               onClick={() => {
                 setUserHasScrolled(false);
-                bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+                scrollToBottom('smooth');
               }}
               variant="inline-link"
               iconName="angle-down"

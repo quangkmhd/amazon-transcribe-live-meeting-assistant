@@ -28,6 +28,9 @@
             display: flex;
             flex-direction: column;
             gap: 15px;
+            scroll-behavior: smooth;
+            will-change: scroll-position;
+            -webkit-overflow-scrolling: touch;
         }
         .message {
             max-width: 80%;
@@ -124,12 +127,21 @@
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
 
+        function scrollToBottom() {
+            requestAnimationFrame(() => {
+                chatMessages.scrollTo({
+                    top: chatMessages.scrollHeight,
+                    behavior: 'smooth'
+                });
+            });
+        }
+
         function addMessage(text, type = 'assistant') {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
             messageDiv.textContent = text;
             chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            scrollToBottom();
         }
 
         function addLoadingMessage() {
@@ -138,7 +150,7 @@
             messageDiv.textContent = 'Thinking...';
             messageDiv.id = 'loadingMessage';
             chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            scrollToBottom();
             return messageDiv;
         }
 
@@ -219,7 +231,7 @@
             streamingMessageDiv.id = `streaming-message-${messageId}`;
             streamingMessageDiv.textContent = '';
             chatMessages.appendChild(streamingMessageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            scrollToBottom();
             
             window.parent.postMessage({
                 type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
@@ -237,7 +249,7 @@
                             window.removeEventListener('message', tokenHandler);
                         } else {
                             streamingMessageDiv.textContent += token.Token;
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                            scrollToBottom();
                         }
                     }
                 }
