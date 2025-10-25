@@ -221,11 +221,24 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
       sentiment_weighted: sentimentWeighted,
     } = transcriptSegmentValue;
 
+    // ✅ Convert milliseconds to seconds, with validation
+    const startTimeSeconds = (startTime || 0) / 1000;
+    let endTimeSeconds = (endTime || 0) / 1000;
+    // ✅ Ensure endTime > startTime (fix old database records with invalid endTime)
+    if (endTimeSeconds <= startTimeSeconds) {
+      // Estimate based on transcript length (avg 3 chars/second speech)
+      const estimatedDuration = Math.max(0.5, transcript.length / 3);
+      endTimeSeconds = startTimeSeconds + estimatedDuration;
+      console.warn(
+        `⚠️ [DB SEGMENT] Invalid endTime for segment ${segmentId}, estimated: ${startTimeSeconds}s → ${endTimeSeconds}s`,
+      );
+    }
+
     return {
       callId,
       segmentId,
-      startTime: startTime / 1000, // Convert milliseconds to seconds
-      endTime: endTime / 1000, // Convert milliseconds to seconds
+      startTime: startTimeSeconds,
+      endTime: endTimeSeconds,
       speaker_number: speakerNumber,
       speaker: speaker || channel,
       transcript,

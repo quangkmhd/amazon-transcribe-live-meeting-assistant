@@ -3,7 +3,6 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
-import { API } from 'aws-amplify';
 import React, { useEffect, useState } from 'react';
 import { useParams, useHistory } from 'react-router-dom';
 import {
@@ -20,8 +19,10 @@ import {
   Box,
   ColumnLayout,
 } from '@awsui/components-react';
-import shareMeetings from '../../graphql/queries/shareMeetings';
-import deleteMeetings from '../../graphql/queries/deleteMeetings';
+import {
+  shareMeetings as supabaseShareMeetings,
+  deleteMeetings as supabaseDeleteMeetings,
+} from '../../utils/supabase-client';
 
 const getListKeys = (callId, createdAt) => {
   const SHARDS_IN_DAY = 6;
@@ -64,27 +65,13 @@ const callsWithKeys = (props) => {
 
 const invokeShareMeetings = async (props, currentRecipients) => {
   const callsKeys = callsWithKeys(props);
-  const response = await API.graphql({
-    query: shareMeetings,
-    variables: {
-      input: { Calls: callsKeys, MeetingRecipients: currentRecipients },
-    },
-  });
-
-  const result = response.data.shareMeetings.Result;
+  const result = await supabaseShareMeetings(callsKeys, currentRecipients);
   return result;
 };
 
 const invokeDeleteMeetings = async (props) => {
   const callsKeys = callsWithKeys(props);
-  const response = await API.graphql({
-    query: deleteMeetings,
-    variables: {
-      input: { Calls: callsKeys },
-    },
-  });
-
-  const result = response.data.deleteMeetings.Result;
+  const result = await supabaseDeleteMeetings(callsKeys);
   return result;
 };
 

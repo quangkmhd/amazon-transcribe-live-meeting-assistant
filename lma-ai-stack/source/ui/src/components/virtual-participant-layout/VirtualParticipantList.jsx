@@ -4,7 +4,6 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState, useEffect } from 'react';
-import { API, graphqlOperation } from 'aws-amplify';
 import PropTypes from 'prop-types';
 import {
   Table,
@@ -31,42 +30,11 @@ import { SFNClient, StartSyncExecutionCommand } from '@aws-sdk/client-sfn';
 import useAppContext from '../../contexts/app';
 import awsExports from '../../aws-exports';
 import useSettingsContext from '../../contexts/settings';
-
-const listVirtualParticipants = `
-  query ListVirtualParticipants {
-    listVirtualParticipants {
-      id
-      meetingName
-      meetingPlatform
-      meetingId
-      meetingTime
-      scheduledFor
-      isScheduled
-      status
-      createdAt
-      updatedAt
-    }
-  }
-`;
-
-const createVirtualParticipant = /* GraphQL */ `
-  mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
-    createVirtualParticipant(input: $input) {
-      id
-      meetingName
-      meetingPlatform
-      meetingId
-      status
-      createdAt
-    }
-  }
-`;
-
-const parseMeetingInvitation = /* GraphQL */ `
-  query ParseMeetingInvitation($invitationText: String!) {
-    parseMeetingInvitation(invitationText: $invitationText)
-  }
-`;
+import {
+  listVirtualParticipants as listVirtualParticipantsSupabase,
+  createVirtualParticipant as createVirtualParticipantSupabase,
+  subscribeToVirtualParticipantUpdates,
+} from '../../utils/supabase-client';
 
 const StatusBadge = ({ status }) => {
   const getStatusProps = (vpStatus) => {
@@ -142,12 +110,13 @@ const VirtualParticipantList = () => {
   const loadParticipants = async () => {
     try {
       setLoading(true);
-      const result = await API.graphql(graphqlOperation(listVirtualParticipants));
-      setParticipants(result.data.listVirtualParticipants || []);
+      const result = await listVirtualParticipantsSupabase();
+      setParticipants(result || []);
     } catch (error) {
+      console.error('Failed to load virtual participants:', error);
       setNotification({
         type: 'error',
-        content: 'Failed to load virtual participants',
+        content: `Failed to load virtual participants: ${error.message}`,
       });
     } finally {
       setLoading(false);
@@ -160,125 +129,105 @@ const VirtualParticipantList = () => {
   }, []);
 
   useEffect(() => {
-    const onUpdateVirtualParticipant = /* GraphQL */ `
-      subscription OnUpdateVirtualParticipant {
-        onUpdateVirtualParticipant {
-          id
-          status
-          updatedAt
-          meetingName
-          owner
-          Owner
-          SharedWith
-        }
+    // Subscribe to virtual participant updates using Supabase realtime
+    const subscription = subscribeToVirtualParticipantUpdates((updatedParticipant) => {
+      if (!updatedParticipant || !updatedParticipant.id) {
+        return;
       }
-    `;
 
-    const subscription = API.graphql(graphqlOperation(onUpdateVirtualParticipant)).subscribe({
-      next: ({ value }) => {
-        const updatedParticipant = value?.data?.onUpdateVirtualParticipant;
+      setParticipants((prev) => {
+        const existingParticipant = prev.find((p) => p.id === updatedParticipant.id);
+        const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
 
-        if (!updatedParticipant || !updatedParticipant.id) {
-          return;
-        }
+        // Only show notification if status actually changed
+        if (
+          existingParticipant &&
+          existingParticipant.status !== updatedParticipant.status &&
+          updatedParticipant.status
+        ) {
+          let notificationType = 'info';
+          let message = '';
 
-        setParticipants((prev) => {
-          const existingParticipant = prev.find((p) => p.id === updatedParticipant.id);
-          const meetingName = updatedParticipant.meetingName || existingParticipant?.meetingName || 'Unknown Meeting';
-          // Only show notification if status actually changed
-          if (
-            existingParticipant &&
-            existingParticipant.status !== updatedParticipant.status &&
-            updatedParticipant.status
-          ) {
-            let notificationType = 'info';
-            let message = '';
-
-            switch (updatedParticipant.status) {
-              case 'INITIALIZING':
-                notificationType = 'info';
-                message = `Virtual Participant initializing for "${meetingName}"`;
-                break;
-              case 'CONNECTING':
-                notificationType = 'info';
-                message = `Virtual Participant connecting to "${meetingName}"`;
-                break;
-              case 'JOINING':
-                notificationType = 'info';
-                message = `Virtual Participant joining "${meetingName}"`;
-                break;
-              case 'JOINED':
-                notificationType = 'success';
-                message = `Virtual Participant joined "${meetingName}"`;
-                break;
-              case 'ACTIVE':
-                notificationType = 'success';
-                message = `Virtual Participant is active in "${meetingName}"`;
-                break;
-              case 'COMPLETED':
-                notificationType = 'success';
-                message = `Virtual Participant completed "${meetingName}"`;
-                break;
-              case 'FAILED':
-                notificationType = 'error';
-                message = `Virtual Participant failed to join "${meetingName}"`;
-                break;
-              default:
-                message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
-            }
-
-            // Check if a similar notification already exists to prevent duplicates
-            setPopupNotifications((current) => {
-              const existingNotification = current.find((n) => n.content === message && n.type === notificationType);
-
-              // If similar notification already exists, don't add a new one
-              if (existingNotification) {
-                return current;
-              }
-
-              const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
-              const popupNotification = {
-                type: notificationType,
-                content: message,
-                dismissible: true,
-                dismissLabel: 'Dismiss',
-                id: notificationId,
-                onDismiss: () => {
-                  setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
-                },
-              };
-
-              // Auto-dismiss after 8 seconds
-              setTimeout(() => {
-                setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
-              }, 8000);
-
-              return [...current, popupNotification];
-            });
+          switch (updatedParticipant.status) {
+            case 'INITIALIZING':
+              notificationType = 'info';
+              message = `Virtual Participant initializing for "${meetingName}"`;
+              break;
+            case 'CONNECTING':
+              notificationType = 'info';
+              message = `Virtual Participant connecting to "${meetingName}"`;
+              break;
+            case 'JOINING':
+              notificationType = 'info';
+              message = `Virtual Participant joining "${meetingName}"`;
+              break;
+            case 'JOINED':
+              notificationType = 'success';
+              message = `Virtual Participant joined "${meetingName}"`;
+              break;
+            case 'ACTIVE':
+              notificationType = 'success';
+              message = `Virtual Participant is active in "${meetingName}"`;
+              break;
+            case 'COMPLETED':
+              notificationType = 'success';
+              message = `Virtual Participant completed "${meetingName}"`;
+              break;
+            case 'FAILED':
+              notificationType = 'error';
+              message = `Virtual Participant failed to join "${meetingName}"`;
+              break;
+            default:
+              message = `Virtual Participant status updated to ${updatedParticipant.status} for "${meetingName}"`;
           }
 
-          return prev.map((p) => {
-            if (p.id === updatedParticipant.id) {
-              return {
-                ...p,
-                status: updatedParticipant.status,
-                updatedAt: updatedParticipant.updatedAt,
-              };
-            }
-            return p;
-          });
-        });
-      },
-      error: () => {
-        const pollInterval = setInterval(() => {
-          loadParticipants();
-        }, 5000);
+          // Check if a similar notification already exists to prevent duplicates
+          setPopupNotifications((current) => {
+            const existingNotification = current.find((n) => n.content === message && n.type === notificationType);
 
-        return () => clearInterval(pollInterval);
-      },
+            // If similar notification already exists, don't add a new one
+            if (existingNotification) {
+              return current;
+            }
+
+            const notificationId = `vp-${updatedParticipant.id}-${updatedParticipant.status}-${Date.now()}`;
+            const popupNotification = {
+              type: notificationType,
+              content: message,
+              dismissible: true,
+              dismissLabel: 'Dismiss',
+              id: notificationId,
+              onDismiss: () => {
+                setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
+              },
+            };
+
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => {
+              setPopupNotifications((notifications) => notifications.filter((n) => n.id !== notificationId));
+            }, 8000);
+
+            return [...current, popupNotification];
+          });
+        }
+
+        return prev.map((p) => {
+          if (p.id === updatedParticipant.id) {
+            return {
+              ...p,
+              status: updatedParticipant.status,
+              updatedAt: updatedParticipant.updatedAt,
+            };
+          }
+          return p;
+        });
+      });
     });
 
-    return () => subscription.unsubscribe();
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []); // Remove dependencies to prevent subscription recreation
 
   // Sorting function
@@ -377,40 +326,12 @@ const VirtualParticipantList = () => {
     setParseError('');
 
     try {
-      const result = await API.graphql(
-        graphqlOperation(parseMeetingInvitation, {
-          invitationText: invitationText.trim(),
-        }),
-      );
+      // TODO: Implement Gemini AI parsing for meeting invitations
+      // For now, show a message that this feature requires Gemini integration
+      setParseError('Meeting invitation parsing requires Gemini AI integration. Please enter details manually.');
 
-      const parsedResponse = JSON.parse(result.data.parseMeetingInvitation);
-
-      if (parsedResponse.success && parsedResponse.data) {
-        const { data } = parsedResponse;
-
-        // Auto-fill the form with parsed data
-        setCreateForm((prev) => ({
-          ...prev,
-          meetingName: data.meetingName || prev.meetingName,
-          meetingPlatform: data.meetingPlatform || prev.meetingPlatform,
-          meetingId: data.meetingId || prev.meetingId,
-          meetingPassword: data.meetingPassword || prev.meetingPassword,
-          meetingDate: data.meetingDate || prev.meetingDate,
-          meetingTime: data.meetingTime || prev.meetingTime,
-        }));
-
-        // Close paste invite modal and open create modal
-        setShowPasteInviteModal(false);
-        setInvitationText('');
-        setShowCreateModal(true);
-
-        setNotification({
-          type: 'success',
-          content: 'Meeting invitation parsed successfully! Please review and verify the details.',
-        });
-      } else {
-        setParseError(parsedResponse.error || 'Failed to parse meeting invitation');
-      }
+      // Placeholder - will be replaced with Gemini API call
+      // const parsedData = await parseInvitationWithGemini(invitationText.trim());
     } catch (error) {
       console.error('Error parsing meeting invitation:', error);
       setParseError('Failed to parse meeting invitation. Please try again or enter details manually.');
@@ -479,7 +400,7 @@ const VirtualParticipantList = () => {
         meetingTimestamp = Math.floor(meetingDateTime.getTime() / 1000);
       }
 
-      // Create VP record with scheduling information
+      // Create VP record with scheduling information using Supabase
       const vpInput = {
         meetingName: createForm.meetingName,
         meetingPlatform: createForm.meetingPlatform,
@@ -494,13 +415,9 @@ const VirtualParticipantList = () => {
         vpInput.isScheduled = true;
       }
 
-      const vpResult = await API.graphql(
-        graphqlOperation(createVirtualParticipant, {
-          input: vpInput,
-        }),
-      );
+      const vpResult = await createVirtualParticipantSupabase(vpInput);
 
-      const virtualParticipantId = vpResult.data.createVirtualParticipant.id;
+      const virtualParticipantId = vpResult.id;
 
       // For immediate execution, still use Step Functions (backward compatibility)
       if (!isScheduled) {

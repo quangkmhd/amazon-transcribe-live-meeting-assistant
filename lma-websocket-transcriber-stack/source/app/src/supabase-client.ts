@@ -18,7 +18,7 @@ export const supabase: SupabaseClient = createClient(
 export async function insertTranscriptEvent(data: {
     meeting_id: string;
     transcript: string;
-    speaker_number?: string;
+    speaker_number: string; // ✅ Required for unique constraint
     speaker_name?: string;
     channel?: string;
     start_time: number;
@@ -31,17 +31,24 @@ export async function insertTranscriptEvent(data: {
     // Log DB insert start
     logger.logDBInsertStart(data.meeting_id, {
         speaker: data.speaker_name || data.speaker_number,
-        segment_id: `${data.start_time}-${data.end_time}`,
+        segment_id: `${data.speaker_number}-${data.start_time}`,
         transcript_length: data.transcript.length
     });
     
-    const { error } = await supabase.from('transcript_events').insert(data);
+    // ✅ Upsert to handle updates when endTime changes (partial → final)
+    const { error } = await supabase
+        .from('transcript_events')
+        .upsert(data, {
+            onConflict: 'meeting_id,start_time,speaker_number',
+            ignoreDuplicates: false, // Update if exists
+        });
     
     const duration = Date.now() - startTime;
 
-    if (error && error.code !== '23505') {
+    if (error) {
         // Log DB insert error
         logger.logDBInsertError(data.meeting_id, error.message, duration);
+        console.error(`❌ [DB INSERT ERROR]:`, error);
         throw new Error(error.message);
     }
     
@@ -61,6 +68,45 @@ export async function upsertMeeting(data: {
         onConflict: 'meeting_id',
     });
     if (error) throw new Error(error.message);
+}
+
+// Calculate meeting duration from transcript segments
+export async function calculateMeetingDuration(meeting_id: string): Promise<number> {
+    const { data, error } = await supabase
+        .from('transcript_events')
+        .select('start_time, end_time')
+        .eq('meeting_id', meeting_id)
+        .order('start_time', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+        return 0;
+    }
+
+    // Get first start_time and last end_time
+    const firstSegment = data[0];
+    const lastSegment = data[data.length - 1];
+    
+    const durationMs = lastSegment.end_time - firstSegment.start_time;
+    return Math.max(0, durationMs); // Ensure non-negative
+}
+
+// Update meeting with duration when ending
+export async function updateMeetingEnd(meeting_id: string) {
+    // Calculate duration from transcript segments
+    const durationMs = await calculateMeetingDuration(meeting_id);
+    
+    const { error } = await supabase
+        .from('meetings')
+        .update({
+            status: 'ended',
+            ended_at: new Date().toISOString(),
+            duration_ms: durationMs,
+        })
+        .eq('meeting_id', meeting_id);
+    
+    if (error) throw error;
+    
+    console.log(`✅ [MEETING] ${meeting_id} ended - Duration: ${durationMs}ms (${(durationMs / 1000).toFixed(1)}s)`);
 }
 
 // Update meeting recording info

@@ -46,6 +46,22 @@ const mapCallsAttributes = (calls, settings) => {
     const callCategoryCount = callCategories?.length || 0;
     const alertCount = callCategories?.length ? countAlerts(callCategories) : 0;
 
+    // Format duration properly
+    let conversationDurationTimeStamp = 'Not available';
+    if (totalConversationDurationMillis && totalConversationDurationMillis > 0) {
+      // Convert milliseconds to HH:MM:SS format
+      const totalSeconds = Math.floor(totalConversationDurationMillis / 1000);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      
+      conversationDurationTimeStamp = [
+        hours.toString().padStart(2, '0'),
+        minutes.toString().padStart(2, '0'),
+        seconds.toString().padStart(2, '0'),
+      ].join(':');
+    }
+
     return {
       callId,
       agentId,
@@ -60,7 +76,7 @@ const mapCallsAttributes = (calls, settings) => {
       recordingUrl,
       pcaUrl,
       totalConversationDurationMillis,
-      conversationDurationTimeStamp: new Date(totalConversationDurationMillis).toISOString().substr(11, 8),
+      conversationDurationTimeStamp,
       sentiment,
       // change callTimestamp to a sortable date format
       initiationTimeStamp: new Date(callTimestamp).toISOString(),

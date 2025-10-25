@@ -218,15 +218,39 @@ export const startSonioxTranscription = async (
                                 tokens[0].confidence
                             );
 
+                            // ✅ Calculate end_time safely: use last token's end_ms if valid, otherwise estimate
+                            const lastToken = tokens[tokens.length - 1];
+                            const firstToken = tokens[0];
+                            let endTime = lastToken.end_ms;
+                            
+                            // If end_ms is invalid, calculate from all tokens or estimate
+                            if (!endTime || endTime <= firstToken.start_ms) {
+                                // Try to find the maximum end_ms from all tokens
+                                const validEndTimes = tokens
+                                    .map((t: any) => t.end_ms)
+                                    .filter((e: number) => e && e > firstToken.start_ms);
+                                
+                                if (validEndTimes.length > 0) {
+                                    endTime = Math.max(...validEndTimes);
+                                } else {
+                                    // Fallback: estimate duration (avg 0.5s per token)
+                                    const estimatedDuration = tokens.length * 500; // 500ms per token
+                                    endTime = firstToken.start_ms + estimatedDuration;
+                                }
+                                
+                                console.log(
+                                    `⚠️ [SONIOX BACKEND] Token end_ms invalid, using calculated endTime: ${endTime}ms (from ${tokens.length} tokens)`
+                                );
+                            }
+
                             const transcriptData = {
                                 meeting_id: callMetaData.callId,
                                 transcript: finalText,
                                 speaker_number: speakerNumber,
                                 speaker_name: speakerName || undefined,
                                 channel: mapSpeakerToChannel(speakerNumber),
-                                start_time: tokens[0].start_ms,
-                                end_time:
-                                    tokens[tokens.length - 1].end_ms,
+                                start_time: firstToken.start_ms,
+                                end_time: endTime,
                                 is_final: true,
                             };
 
@@ -256,7 +280,7 @@ export const startSonioxTranscription = async (
                                 `[SONIOX]: [${callMetaData.callId}] - Saved transcript for speaker ${speakerNumber}`
                             );
                             
-                            // ✅ FORWARD FINAL transcript to browser
+                            // ✅ FORWARD FINAL transcript to browser (with validated times in milliseconds)
                             if (socketCallMap.clientWs && socketCallMap.clientWs.readyState === 1) {
                                 const finalTranscript = {
                                     event: 'TRANSCRIPT',
@@ -265,8 +289,8 @@ export const startSonioxTranscription = async (
                                     speaker_number: speakerNumber,
                                     speaker_name: speakerName || `Speaker ${speakerNumber}`,
                                     channel: transcriptData.channel,
-                                    start_time: transcriptData.start_time,
-                                    end_time: transcriptData.end_time,
+                                    start_time: transcriptData.start_time / 1000, // Convert ms → seconds for frontend
+                                    end_time: transcriptData.end_time / 1000, // Convert ms → seconds for frontend
                                     is_partial: false,
                                     is_final: true,
                                 };
@@ -358,11 +382,12 @@ export const writeMeetingEndEvent = async (
     callMetaData: CallMetaData,
     server: FastifyInstance
 ): Promise<void> => {
-    await upsertMeeting({
-        meeting_id: callMetaData.callId,
-        status: 'ended',
-    });
+    // Import the updateMeetingEnd function
+    const { updateMeetingEnd } = await import('../supabase-client');
+    
+    // Update meeting status and calculate duration from transcript segments
+    await updateMeetingEnd(callMetaData.callId);
 
-    server.log.info(`[MEETING]: [${callMetaData.callId}] - Meeting ended`);
+    server.log.info(`[MEETING]: [${callMetaData.callId}] - Meeting ended with duration calculated`);
 };
 

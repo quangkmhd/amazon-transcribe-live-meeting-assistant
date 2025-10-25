@@ -38,6 +38,28 @@ console.error = (...args) => {
   originalError.apply(console, args);
 };
 
+// Suppress ResizeObserver errors at the window level (uncaught runtime errors)
+// These bubble up from the ResizeObserver API when many DOM updates happen rapidly
+window.addEventListener('error', (e) => {
+  if (
+    e.message === 'ResizeObserver loop completed with undelivered notifications.' ||
+    e.message === 'ResizeObserver loop limit exceeded'
+  ) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    return false;
+  }
+  return true;
+});
+
+// Also suppress unhandled promise rejections related to ResizeObserver
+window.addEventListener('unhandledrejection', (e) => {
+  if (e.reason && typeof e.reason === 'string' && e.reason.includes('ResizeObserver')) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }
+});
+
 ReactDOM.render(
   <React.StrictMode>
     <App />
