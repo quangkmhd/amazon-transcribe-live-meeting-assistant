@@ -437,9 +437,10 @@ const onTextMessage = async (
       }
   } else if (callMetaData.callEvent === 'SUBSCRIBE') {
       // Viewing connection wants to subscribe to an existing call for real-time updates
-      server.log.debug(
-          `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Viewer subscribing to call`
-      );
+      // Comment out to reduce log spam during idle periods
+      // server.log.debug(
+      //     `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Viewer subscribing to call`
+      // );
       
       const socketCallMap: SocketCallData = {
           callMetadata: {
@@ -473,9 +474,10 @@ const onTextMessage = async (
           message: 'Subscribed to call for real-time updates'
       }));
       
-      server.log.debug(
-          `[SUBSCRIBE_ACK]: [${callMetaData.callId}] - Sent SUBSCRIBE_ACK to viewing client`
-      );
+      // Comment out to reduce log spam during idle periods
+      // server.log.debug(
+      //     `[SUBSCRIBE_ACK]: [${callMetaData.callId}] - Sent SUBSCRIBE_ACK to viewing client`
+      // );
   } else if (callMetaData.callEvent === 'END') {
       const socketData = socketMap.get(ws);
       if (!socketData || !socketData.callMetadata) {

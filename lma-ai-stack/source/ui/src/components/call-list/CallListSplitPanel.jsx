@@ -36,10 +36,17 @@ const CallListSplitPanel = () => {
 
   const sendTranscriptSegmentsRequests = async (item) => {
     const { callId } = item;
-    if (!callTranscriptPerCallId[callId]) {
-      await sendGetTranscriptSegmentsRequest(callId);
-    }
-    if (item?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+    // Always fetch database segments to get historical data
+    await sendGetTranscriptSegmentsRequest(callId);
+
+    // ✅ Subscribe to live transcripts if meeting is in progress (STARTED or TRANSCRIBING)
+    // Check both Status field and recordingStatusLabel
+    const isInProgress =
+      item?.recordingStatusLabel === IN_PROGRESS_STATUS ||
+      item?.Status === 'STARTED' ||
+      item?.Status === 'TRANSCRIBING';
+
+    if (isInProgress) {
       setLiveTranscriptCallId(callId);
     }
   };

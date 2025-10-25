@@ -914,24 +914,37 @@ const CallInProgressTranscript = ({
       console.log(`        Time: ${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s`);
     });
 
-    // For live calls: ONLY show live tokens (don't mix with database)
-    // For completed calls: show database segments only
+    // Get database segments
+    const databaseSegments = transcriptChannels
+      .map((c) => {
+        const { segments } = transcriptsForThisCallId[c];
+        return segments;
+      })
+      .reduce((p, c) => [...p, ...c], [])
+      .sort((a, b) => a.startTime - b.startTime);
+
     const hasLiveTokens = liveTokenSegments.length > 0;
+    const hasDatabaseSegments = databaseSegments.length > 0;
 
     console.log('🔍 [DEBUG SEGMENTS]');
     console.log('  Live token segments:', liveTokenSegments.length);
+    console.log('  Database segments:', databaseSegments.length);
 
-    const allSegments = hasLiveTokens
-      ? liveTokenSegments // ✅ Live call: show ONLY real-time tokens
-      : transcriptChannels
-          .map((c) => {
-            const { segments } = transcriptsForThisCallId[c];
-            return segments;
-          })
-          .reduce((p, c) => [...p, ...c], [])
-          .sort((a, b) => a.startTime - b.startTime); // ✅ Completed call: sort by start time, not end time
+    // ✅ For in-progress calls: Show BOTH database + live tokens (merged by time)
+    // ✅ For completed calls: Show database only
+    let allSegments = [];
+    if (hasLiveTokens && hasDatabaseSegments) {
+      // Merge database + live, sort by time
+      console.log('  Using: DATABASE + LIVE TOKENS (MERGED)');
+      allSegments = [...databaseSegments, ...liveTokenSegments].sort((a, b) => a.startTime - b.startTime);
+    } else if (hasLiveTokens) {
+      console.log('  Using: LIVE TOKENS ONLY');
+      allSegments = liveTokenSegments;
+    } else {
+      console.log('  Using: DATABASE ONLY');
+      allSegments = databaseSegments;
+    }
 
-    console.log('  Using:', hasLiveTokens ? 'LIVE TOKENS' : 'DATABASE');
     console.log('  Total segments to render:', allSegments.length);
 
     const currentTurnByTurnSegments = allSegments

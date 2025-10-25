@@ -44,15 +44,23 @@ const CallDetails = () => {
       console.log('[DEBUG CallDetails] callId:', callId);
       console.log('[DEBUG CallDetails] Cached data for this call:', callTranscriptPerCallId[callId]);
       console.log('[DEBUG CallDetails] Has cached data?', !!callTranscriptPerCallId[callId]);
-      if (!callTranscriptPerCallId[callId]) {
-        console.log('[DEBUG CallDetails] Fetching transcript segments...');
-        await sendGetTranscriptSegmentsRequest(callId);
-      } else {
-        console.log('[DEBUG CallDetails] Using cached transcript data - forcing refetch');
-        await sendGetTranscriptSegmentsRequest(callId);
-      }
-      if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
+
+      // Always fetch database segments to get historical data
+      console.log('[DEBUG CallDetails] Fetching transcript segments from database...');
+      await sendGetTranscriptSegmentsRequest(callId);
+
+      // ✅ Subscribe to live transcripts if meeting is in progress (STARTED or TRANSCRIBING)
+      // Check both Status field and recordingStatusLabel
+      const isInProgress =
+        callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS ||
+        callDetails?.Status === 'STARTED' ||
+        callDetails?.Status === 'TRANSCRIBING';
+
+      if (isInProgress) {
+        console.log('[DEBUG CallDetails] Meeting is in progress, subscribing to live transcripts...');
         setLiveTranscriptCallId(callId);
+      } else {
+        console.log('[DEBUG CallDetails] Meeting is completed, no live subscription needed');
       }
     }
   };

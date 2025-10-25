@@ -42,9 +42,11 @@ async function triggerEdgeFunction(): Promise<void> {
         if (response.ok) {
             if (result.processed && result.processed > 0) {
                 console.log(`[EDGE SCHEDULER] Processed ${result.processed} events in ${duration}ms`);
-            } else {
-                console.debug(`[EDGE SCHEDULER] Ran successfully (0 events) in ${duration}ms`);
             }
+            // Bỏ qua log khi 0 events để giảm spam
+            // else {
+            //     console.debug(`[EDGE SCHEDULER] Ran successfully (0 events) in ${duration}ms`);
+            // }
         } else {
             console.error(`[EDGE SCHEDULER] Failed: ${response.status} ${response.statusText}`, result);
         }

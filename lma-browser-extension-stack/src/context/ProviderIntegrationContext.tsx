@@ -349,10 +349,8 @@ function IntegrationProvider({ children }: any) {
             sendMessage(audioData);
           }
         } else if (request.action === "ActiveSpeakerChange") {
-          currentCall.callEvent = 'SPEAKER_CHANGE';
-          currentCall.activeSpeaker = request.active_speaker;
-          setActiveSpeaker(request.active_speaker);
-          sendMessage(JSON.stringify(currentCall));
+          // Speaker diarization disabled - ignore ActiveSpeakerChange
+          console.log('ActiveSpeakerChange event ignored (speaker diarization disabled)');
         } else if (request.action === "MuteChange") {
           setMuted(request.mute);
         }
