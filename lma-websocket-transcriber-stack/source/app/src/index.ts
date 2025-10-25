@@ -464,7 +464,6 @@ const onTextMessage = async (
           speakerEvents: [],
           ended: false,
           clientWs: ws,
-          isViewingConnection: true, // ✅ Mark as viewing-only connection
       };
       socketMap.set(ws, socketCallMap);
       
@@ -521,22 +520,14 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
     ws.close(code);
     const socketData = socketMap.get(ws);
     if (socketData) {
-        // ✅ Only end meeting if this is a recording connection, not a viewing connection
-        if (socketData.isViewingConnection) {
-            server.log.debug(
-                `[ON WSCLOSE]: [${socketData.callMetadata.callId}] - Viewing connection closed, NOT ending meeting`
-            );
-            socketMap.delete(ws);
-        } else {
-            server.log.debug(
-                `[ON WSCLOSE]: [${
-                    socketData.callMetadata.callId
-                }] - Recording connection closed, writing call end event ${JSON.stringify(
-                    socketData.callMetadata
-                )}`
-            );
-            await endCall(ws, socketData);
-        }
+        server.log.debug(
+            `[ON WSCLOSE]: [${
+                socketData.callMetadata.callId
+            }] - Writing call end event due to websocket close event ${JSON.stringify(
+                socketData.callMetadata
+            )}`
+        );
+        await endCall(ws, socketData);
     }
 };
 

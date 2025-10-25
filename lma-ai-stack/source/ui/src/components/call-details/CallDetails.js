@@ -51,31 +51,10 @@ const CallDetails = () => {
 
       // ✅ Subscribe to live transcripts if meeting is in progress (STARTED or TRANSCRIBING)
       // Check both Status field and recordingStatusLabel
-      // ALSO check if meeting was recently started (within last hour) to handle refresh case
-      const now = Date.now();
-      const startedAt = callDetails?.initiationTimeStamp ? new Date(callDetails.initiationTimeStamp).getTime() : 0;
-      const timeSinceStart = now - startedAt;
-      const ONE_HOUR = 60 * 60 * 1000; // 1 hour in milliseconds
-
-      const isRecentlyStarted = timeSinceStart < ONE_HOUR;
-      // Status 'ENDED' means meeting truly ended, status 'ended' (lowercase) is from backend on disconnect
-      const hasExplicitEndStatus = callDetails?.Status === 'ENDED';
-
       const isInProgress =
         callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS ||
         callDetails?.Status === 'STARTED' ||
-        callDetails?.Status === 'TRANSCRIBING' ||
-        (isRecentlyStarted && !hasExplicitEndStatus); // ✅ Handle refresh case
-
-      console.log('[DEBUG CallDetails] Status check:', {
-        recordingStatusLabel: callDetails?.recordingStatusLabel,
-        Status: callDetails?.Status,
-        startedAt: callDetails?.initiationTimeStamp,
-        timeSinceStart: `${Math.floor(timeSinceStart / 1000)}s`,
-        isRecentlyStarted,
-        hasExplicitEndStatus,
-        isInProgress,
-      });
+        callDetails?.Status === 'TRANSCRIBING';
 
       if (isInProgress) {
         console.log('[DEBUG CallDetails] Meeting is in progress, subscribing to live transcripts...');

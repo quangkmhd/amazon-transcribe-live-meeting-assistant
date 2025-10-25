@@ -107,5 +107,4 @@ export type SocketCallData = {
     sonioxWs?: WebSocket, // Soniox WebSocket connection
     clientWs?: WebSocket, // Client WebSocket connection (to send transcripts back to browser)
     audioChunkCount?: number, // Track number of audio chunks received for pipeline debugging
-    isViewingConnection?: boolean, // True if this is a viewing-only connection (SUBSCRIBE), false for recording
 }
