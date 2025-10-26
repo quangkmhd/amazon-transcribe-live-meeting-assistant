@@ -1,0 +1,79 @@
+/*
+ * Copyright (c) 2025
+ * Storage Quota Bar Styles
+ */
+
+.storage-quota-container {
+  border-top: 1px solid #e9ebed;
+  background-color: #ffffff;
+  margin-top: auto;
+}
+
+.storage-quota-bar-clickable {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.storage-quota-bar-clickable:hover {
+  opacity: 0.8;
+}
+
+/* Pulse animation for over-quota warning */
+.storage-quota-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Dark mode support */
+[data-awsui-color-scheme="dark"] .storage-quota-container {
+  background-color: #16191f;
+  border-top: 1px solid #414d5c;
+}
+
+/* Align Storage label and info icon */
+.sq-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Custom simple progress bar */
+.sq-bar {
+  position: relative;
+  width: 100%;
+  height: 10px;
+  border-radius: 9999px;
+  background: #e5e7eb; /* light gray */
+  overflow: hidden;
+}
+
+.sq-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+/* Colors based on usage */
+.sq-safe { /* blue like sample */
+  background: #1f6feb;
+}
+.sq-warn { /* yellow */
+  background: #f59e0b;
+}
+.sq-error { /* red */
+  background: #dc2626;
+}
+
+/* Dark mode adjustments */
+[data-awsui-color-scheme="dark"] .sq-bar {
+  background: #263043;
+}
+

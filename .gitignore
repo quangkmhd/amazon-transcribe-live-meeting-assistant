@@ -31,3 +31,5 @@ images/
 node_modules/
 *.txt
 *.md
+*.pdf
+.playwright-mcp/

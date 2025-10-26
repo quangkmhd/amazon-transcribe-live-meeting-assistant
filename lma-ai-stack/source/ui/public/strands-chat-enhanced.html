@@ -1,0 +1,896 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,minimal-ui">
+    <title>Meeting Assistant</title>
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Highlight.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #343541;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            color: #ececf1;
+        }
+        
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 100%;
+            margin: 0 auto;
+            background: #343541;
+            overflow: hidden;
+        }
+        
+        .chat-header {
+            padding: 12px 20px;
+            background: #202123;
+            border-bottom: 1px solid #444654;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .chat-header h3 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: #ececf1;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .icon-button {
+            background: transparent;
+            border: 1px solid #565869;
+            color: #ececf1;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        
+        .icon-button:hover {
+            background: #40414f;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            scroll-behavior: smooth;
+        }
+        
+        .message-wrapper {
+            width: 100%;
+            border-bottom: 1px solid #444654;
+            padding: 20px;
+        }
+        
+        .message-wrapper.user {
+            background: #343541;
+        }
+        
+        .message-wrapper.assistant {
+            background: #444654;
+        }
+        
+        .message-content {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            gap: 16px;
+        }
+        
+        .avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .avatar.user {
+            background: #19c37d;
+            color: white;
+        }
+        
+        .avatar.assistant {
+            background: #10a37f;
+            color: white;
+        }
+        
+        .message-body {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .message-text {
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+        
+        .message-text p {
+            margin: 0 0 12px 0;
+        }
+        
+        .message-text p:last-child {
+            margin-bottom: 0;
+        }
+        
+        .message-text code {
+            background: #202123;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .message-text pre {
+            background: #202123;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        
+        .message-text pre code {
+            background: transparent;
+            padding: 0;
+        }
+        
+        .message-text ul, .message-text ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+        
+        .message-text li {
+            margin: 4px 0;
+        }
+        
+        .message-meta {
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #8e8ea0;
+        }
+        
+        .timestamp {
+            color: #8e8ea0;
+        }
+        
+        .copy-button {
+            background: transparent;
+            border: none;
+            color: #8e8ea0;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        
+        .copy-button:hover {
+            background: #40414f;
+            color: #ececf1;
+        }
+        
+        .input-container {
+            padding: 20px;
+            background: #343541;
+            border-top: 1px solid #444654;
+        }
+        
+        .input-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+            position: relative;
+            background: #40414f;
+            border-radius: 12px;
+            border: 1px solid #565869;
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            gap: 8px;
+        }
+        
+        .upload-button {
+            background: transparent;
+            border: none;
+            color: #8e8ea0;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .upload-button:hover {
+            background: #565869;
+            color: #ececf1;
+        }
+        
+        .upload-button svg {
+            width: 20px;
+            height: 20px;
+        }
+        
+        .input-field {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #ececf1;
+            font-size: 14px;
+            resize: none;
+            max-height: 200px;
+            min-height: 24px;
+            font-family: inherit;
+        }
+        
+        .input-field::placeholder {
+            color: #8e8ea0;
+        }
+        
+        .send-button {
+            background: transparent;
+            border: none;
+            color: #8e8ea0;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .send-button:hover:not(:disabled) {
+            background: #565869;
+            color: #ececf1;
+        }
+        
+        .send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .send-button svg {
+            width: 20px;
+            height: 20px;
+        }
+        
+        .loading-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 8px;
+        }
+        
+        .loading-dot {
+            width: 8px;
+            height: 8px;
+            background: #8e8ea0;
+            border-radius: 50%;
+            animation: pulse 1.4s ease-in-out infinite;
+        }
+        
+        .loading-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .loading-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes pulse {
+            0%, 80%, 100% {
+                opacity: 0.4;
+                transform: scale(0.8);
+            }
+            40% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .uploaded-file {
+            background: #40414f;
+            padding: 8px 12px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 4px 0;
+            font-size: 13px;
+        }
+        
+        .uploaded-file-remove {
+            background: transparent;
+            border: none;
+            color: #8e8ea0;
+            cursor: pointer;
+            padding: 2px;
+            margin-left: 4px;
+        }
+        
+        .uploaded-file-remove:hover {
+            color: #ececf1;
+        }
+        
+        /* Scrollbar styling */
+        .chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-track {
+            background: #343541;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #565869;
+            border-radius: 4px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #6e6e80;
+        }
+        
+        .regenerate-button {
+            margin-top: 8px;
+            background: transparent;
+            border: 1px solid #565869;
+            color: #ececf1;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .regenerate-button:hover {
+            background: #40414f;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h3>🤖 Meeting Assistant</h3>
+            <div class="header-actions">
+                <button class="icon-button" onclick="clearHistory()">🗑️ Clear History</button>
+                <button class="icon-button" onclick="exportChat()">📥 Export</button>
+            </div>
+        </div>
+        
+        <div class="chat-messages" id="chatMessages">
+            <!-- Messages will be added here -->
+        </div>
+        
+        <div class="input-container">
+            <div class="input-wrapper">
+                <button class="upload-button" id="uploadButton" title="Upload document">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.pptx,.xlsx,.txt,.md" style="display: none" />
+                </button>
+                <div id="uploadedFiles"></div>
+                <textarea 
+                    class="input-field" 
+                    id="messageInput" 
+                    placeholder="Message Meeting Assistant..." 
+                    rows="1"
+                ></textarea>
+                <button class="send-button" id="sendButton">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const callId = urlParams.get("callId");
+        const userId = localStorage.getItem('lma_user_id') || 'default_user';
+
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const uploadButton = document.getElementById('uploadButton');
+        const fileInput = document.getElementById('fileInput');
+        const uploadedFilesDiv = document.getElementById('uploadedFiles');
+
+        let conversationHistory = [];
+        let uploadedFile = null;
+
+        // Configure marked for markdown rendering
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            }
+        });
+
+        // Load conversation history from localStorage
+        function loadConversationHistory() {
+            try {
+                const key = `lma_conversation_${userId}`;
+                const stored = localStorage.getItem(key);
+                if (stored) {
+                    conversationHistory = JSON.parse(stored);
+                    // Keep only last 20
+                    conversationHistory = conversationHistory.slice(-20);
+                    renderConversationHistory();
+                } else {
+                    // Add welcome message
+                    addWelcomeMessage();
+                }
+            } catch (error) {
+                console.error('Error loading history:', error);
+                addWelcomeMessage();
+            }
+        }
+
+        // Save conversation to localStorage
+        function saveConversation() {
+            try {
+                const key = `lma_conversation_${userId}`;
+                // Keep only last 20
+                const toSave = conversationHistory.slice(-20);
+                localStorage.setItem(key, JSON.stringify(toSave));
+            } catch (error) {
+                console.error('Error saving conversation:', error);
+            }
+        }
+
+        // Clear history
+        function clearHistory() {
+            if (confirm('Are you sure you want to clear all conversation history?')) {
+                conversationHistory = [];
+                saveConversation();
+                chatMessages.innerHTML = '';
+                addWelcomeMessage();
+            }
+        }
+
+        // Export chat
+        function exportChat() {
+            const text = conversationHistory.map(msg => {
+                const role = msg.role === 'user' ? 'You' : 'Assistant';
+                const time = new Date(msg.timestamp).toLocaleString();
+                return `[${time}] ${role}: ${msg.content}`;
+            }).join('\n\n');
+            
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `chat-${callId || 'export'}-${Date.now()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Add welcome message
+        function addWelcomeMessage() {
+            const welcomeMsg = {
+                role: 'assistant',
+                content: 'Hello! I\'m your Meeting Assistant. I can help answer questions about:\n\n- The current meeting conversation\n- Uploaded documents in the knowledge base\n- General information\n\nHow can I assist you today?',
+                timestamp: new Date().toISOString(),
+                id: 'welcome_msg'
+            };
+            conversationHistory.push(welcomeMsg);
+            renderMessage(welcomeMsg);
+        }
+
+        // Render all conversation history
+        function renderConversationHistory() {
+            chatMessages.innerHTML = '';
+            conversationHistory.forEach(msg => renderMessage(msg));
+            scrollToBottom();
+        }
+
+        // Render a single message
+        function renderMessage(msg) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `message-wrapper ${msg.role}`;
+            
+            const content = document.createElement('div');
+            content.className = 'message-content';
+            
+            // Avatar
+            const avatar = document.createElement('div');
+            avatar.className = `avatar ${msg.role}`;
+            avatar.textContent = msg.role === 'user' ? '👤' : '🤖';
+            
+            // Message body
+            const body = document.createElement('div');
+            body.className = 'message-body';
+            
+            // Message text with markdown
+            const text = document.createElement('div');
+            text.className = 'message-text';
+            text.innerHTML = marked.parse(msg.content || '');
+            
+            // Message meta (timestamp, copy button)
+            const meta = document.createElement('div');
+            meta.className = 'message-meta';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'timestamp';
+            timestamp.textContent = formatTimestamp(msg.timestamp);
+            
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'copy-button';
+            copyBtn.textContent = '📋 Copy';
+            copyBtn.onclick = () => copyMessage(msg.content);
+            
+            meta.appendChild(timestamp);
+            if (msg.role === 'assistant') {
+                meta.appendChild(copyBtn);
+                
+                // Add regenerate button for last assistant message
+                if (msg.id === conversationHistory[conversationHistory.length - 1]?.id) {
+                    const regenBtn = document.createElement('button');
+                    regenBtn.className = 'copy-button';
+                    regenBtn.textContent = '🔄 Regenerate';
+                    regenBtn.onclick = () => regenerateResponse(msg.id);
+                    meta.appendChild(regenBtn);
+                }
+            }
+            
+            body.appendChild(text);
+            body.appendChild(meta);
+            
+            content.appendChild(avatar);
+            content.appendChild(body);
+            wrapper.appendChild(content);
+            chatMessages.appendChild(wrapper);
+            
+            scrollToBottom();
+        }
+
+        // Format timestamp
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) return 'Just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return date.toLocaleString();
+        }
+
+        // Copy message
+        function copyMessage(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+
+        // Regenerate response
+        function regenerateResponse(messageId) {
+            // Find the user message before this assistant message
+            const msgIndex = conversationHistory.findIndex(m => m.id === messageId);
+            if (msgIndex > 0) {
+                const userMsg = conversationHistory[msgIndex - 1];
+                if (userMsg.role === 'user') {
+                    // Remove the old assistant response
+                    conversationHistory.splice(msgIndex, 1);
+                    saveConversation();
+                    renderConversationHistory();
+                    
+                    // Resend the user message
+                    sendMessageToAPI(userMsg.content);
+                }
+            }
+        }
+
+        // Scroll to bottom
+        function scrollToBottom() {
+            requestAnimationFrame(() => {
+                chatMessages.scrollTo({
+                    top: chatMessages.scrollHeight,
+                    behavior: 'smooth'
+                });
+            });
+        }
+
+        // Add user message
+        function addUserMessage(text) {
+            const msg = {
+                role: 'user',
+                content: text,
+                timestamp: new Date().toISOString(),
+                id: `user_${Date.now()}`
+            };
+            
+            conversationHistory.push(msg);
+            saveConversation();
+            renderMessage(msg);
+        }
+
+        // Add assistant message (streaming)
+        function startAssistantMessage(messageId) {
+            const msg = {
+                role: 'assistant',
+                content: '',
+                timestamp: new Date().toISOString(),
+                id: messageId
+            };
+            
+            conversationHistory.push(msg);
+            renderMessage(msg);
+            
+            return msg;
+        }
+
+        // Update assistant message
+        function updateAssistantMessage(messageId, token) {
+            const msg = conversationHistory.find(m => m.id === messageId);
+            if (msg) {
+                msg.content += token;
+                saveConversation();
+                
+                // Update the rendered message
+                const wrapper = Array.from(chatMessages.children).find(w => {
+                    const body = w.querySelector('.message-body');
+                    return body && body.parentElement.parentElement === w;
+                });
+                
+                if (wrapper) {
+                    const textDiv = wrapper.querySelector('.message-text');
+                    if (textDiv) {
+                        textDiv.innerHTML = marked.parse(msg.content);
+                    }
+                }
+                
+                scrollToBottom();
+            }
+        }
+
+        // Add loading indicator
+        function addLoadingIndicator() {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'message-wrapper assistant';
+            wrapper.id = 'loadingIndicator';
+            
+            const content = document.createElement('div');
+            content.className = 'message-content';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar assistant';
+            avatar.textContent = '🤖';
+            
+            const body = document.createElement('div');
+            body.className = 'message-body';
+            
+            const loading = document.createElement('div');
+            loading.className = 'loading-indicator';
+            loading.innerHTML = '<div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div>';
+            
+            body.appendChild(loading);
+            content.appendChild(avatar);
+            content.appendChild(body);
+            wrapper.appendChild(content);
+            chatMessages.appendChild(wrapper);
+            scrollToBottom();
+        }
+
+        function removeLoadingIndicator() {
+            const loading = document.getElementById('loadingIndicator');
+            if (loading) {
+                loading.remove();
+            }
+        }
+
+        // Handle file upload
+        uploadButton.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                uploadedFile = file;
+                showUploadedFile(file);
+            }
+        });
+
+        function showUploadedFile(file) {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'uploaded-file';
+            fileDiv.innerHTML = `
+                📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB)
+                <button class="uploaded-file-remove" onclick="removeUploadedFile()">✕</button>
+            `;
+            uploadedFilesDiv.innerHTML = '';
+            uploadedFilesDiv.appendChild(fileDiv);
+        }
+
+        function removeUploadedFile() {
+            uploadedFile = null;
+            uploadedFilesDiv.innerHTML = '';
+            fileInput.value = '';
+        }
+
+        // Send message
+        async function sendMessage() {
+            let message = messageInput.value.trim();
+            if (!message && !uploadedFile) return;
+            
+            // If file uploaded, mention it
+            if (uploadedFile) {
+                if (!message) {
+                    message = `Please analyze this document: ${uploadedFile.name}`;
+                } else {
+                    message = `${message}\n\n[Uploaded: ${uploadedFile.name}]`;
+                }
+            }
+            
+            addUserMessage(message);
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            sendButton.disabled = true;
+            
+            await sendMessageToAPI(message);
+            
+            // Clear uploaded file after sending
+            if (uploadedFile) {
+                removeUploadedFile();
+            }
+            
+            sendButton.disabled = false;
+            messageInput.focus();
+        }
+
+        async function sendMessageToAPI(message) {
+            addLoadingIndicator();
+
+            try {
+                // Get last 10 messages for context
+                const recentMessages = conversationHistory.slice(-10);
+                const contextMessages = recentMessages.map(m => ({
+                    role: m.role,
+                    content: m.content
+                }));
+                
+                const response = await callSendChatMessageAPI(message, callId, contextMessages);
+                
+                if (response?.data?.sendChatMessage) {
+                    const messageId = response.data.sendChatMessage.MessageId;
+                    removeLoadingIndicator();
+                    const assistantMsg = startAssistantMessage(messageId);
+                    subscribeToTokenStream(messageId);
+                    
+                    // Fallback for non-streaming responses
+                    if (response.data.sendChatMessage.Response) {
+                        updateAssistantMessage(messageId, response.data.sendChatMessage.Response);
+                    }
+                } else {
+                    removeLoadingIndicator();
+                    addUserMessage('Unexpected response format', 'error');
+                }
+            } catch (error) {
+                removeLoadingIndicator();
+                const errorMsg = {
+                    role: 'assistant',
+                    content: `Error: ${error.message}`,
+                    timestamp: new Date().toISOString(),
+                    id: `error_${Date.now()}`
+                };
+                conversationHistory.push(errorMsg);
+                saveConversation();
+                renderMessage(errorMsg);
+            }
+        }
+
+        async function callSendChatMessageAPI(message, callId, contextMessages) {
+            return new Promise((resolve, reject) => {
+                const messageId = `chat-${Date.now()}`;
+                
+                const messageHandler = (event) => {
+                    if (event.data?.type === 'STRANDS_CHAT_RESPONSE' && event.data.messageId === messageId) {
+                        window.removeEventListener('message', messageHandler);
+                        event.data.success ? resolve(event.data.result) : reject(new Error(event.data.error));
+                    }
+                };
+                
+                window.addEventListener('message', messageHandler);
+                
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'STRANDS_CHAT_REQUEST',
+                        messageId,
+                        callId,
+                        message,
+                        contextMessages  // Send last 10 messages
+                    }, '*');
+                    
+                    setTimeout(() => {
+                        window.removeEventListener('message', messageHandler);
+                        reject(new Error('Request timeout'));
+                    }, 30000);
+                } else {
+                    reject(new Error('No parent window available'));
+                }
+            });
+        }
+
+        function subscribeToTokenStream(messageId) {
+            window.parent.postMessage({
+                type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
+                callId,
+                messageId
+            }, '*');
+            
+            const tokenHandler = (event) => {
+                if (event.data?.type === 'STRANDS_TOKEN_MESSAGE') {
+                    const token = event.data.token;
+                    
+                    if (token.MessageId === messageId) {
+                        if (token.IsComplete) {
+                            window.removeEventListener('message', tokenHandler);
+                            saveConversation();
+                        } else {
+                            updateAssistantMessage(messageId, token.Token);
+                        }
+                    }
+                }
+            };
+            
+            window.addEventListener('message', tokenHandler);
+        }
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Initialize
+        loadConversationHistory();
+        messageInput.focus();
+    </script>
+</body>
+</html>
+

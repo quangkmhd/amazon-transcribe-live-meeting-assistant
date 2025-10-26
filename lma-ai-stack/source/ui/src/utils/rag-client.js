@@ -9,20 +9,7 @@
  */
 
 import { supabase } from './supabase-client';
-
-/**
- * Convert File to base64
- * @param {File} file
- * @returns {Promise<string>} Base64 string
- */
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = (error) => reject(error);
-  });
-}
+import { checkQuotaAvailable, formatBytes } from './storage-quota';
 
 /**
  * Upload a knowledge document
@@ -42,34 +29,73 @@ export async function uploadKnowledgeDocument(file) {
     const ownerEmail = user.email;
     const fileName = file.name;
     const fileType = file.name.split('.').pop().toLowerCase();
+    const documentId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Read file as base64
-    const fileContent = await fileToBase64(file);
+    // Check storage quota before uploading
+    const quotaCheck = await checkQuotaAvailable(ownerEmail, file.size);
+    if (!quotaCheck.isAvailable) {
+      const currentUsageFormatted = formatBytes(quotaCheck.currentUsage);
+      const quotaFormatted = formatBytes(quotaCheck.quota);
+      const fileSizeFormatted = formatBytes(file.size);
+      const availableFormatted = formatBytes(quotaCheck.availableBytes);
 
-    //  Upload via document processor (could be Lambda function or Supabase function)
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/document-processor`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        operation: 'process',
-        file_content: fileContent.split(',')[1], // Remove data URL prefix
-        filename: fileName,
+      throw new Error(
+        `Storage quota exceeded!\n\n` +
+          `Current usage: ${currentUsageFormatted} of ${quotaFormatted}\n` +
+          `File size: ${fileSizeFormatted}\n` +
+          `Available space: ${availableFormatted}\n\n` +
+          `Please delete old files to free up space before uploading.`,
+      );
+    }
+
+    // Step 1: Upload file to Supabase Storage
+    const storagePath = `${ownerEmail}/${documentId}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage.from('knowledge-documents').upload(storagePath, file, {
+      cacheControl: '3600',
+      upsert: false,
+    });
+
+    if (uploadError) {
+      throw new Error(`Storage upload failed: ${uploadError.message}`);
+    }
+
+    // Step 2: Create document record in database
+    const { data: docData, error: insertError } = await supabase
+      .from('knowledge_documents')
+      .insert({
+        document_id: documentId,
         owner_email: ownerEmail,
+        file_name: fileName,
+        file_type: fileType,
+        file_size: file.size,
+        storage_path: storagePath,
+        processing_status: 'pending',
+        chunk_count: 0,
         metadata: {
           uploaded_via: 'web_ui',
           file_type: fileType,
         },
-      }),
-    });
+      })
+      .select()
+      .single();
 
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
+    if (insertError) {
+      // Cleanup storage if database insert fails
+      await supabase.storage.from('knowledge-documents').remove([storagePath]);
+      throw new Error(`Database insert failed: ${insertError.message}`);
     }
 
-    const result = await response.json();
-    return result;
+    console.log('Document uploaded successfully:', docData);
+
+    // Step 3: Trigger processing (will be done by backend service/Edge Function)
+    // For now, just return success - processing happens asynchronously
+    return {
+      success: true,
+      document_id: documentId,
+      filename: fileName,
+      status: 'pending',
+    };
   } catch (error) {
     console.error('Error uploading document:', error);
     throw error;
@@ -103,7 +129,22 @@ export async function listKnowledgeDocuments() {
       throw error;
     }
 
-    return data || [];
+    // Transform snake_case to camelCase for UI
+    const transformedData = (data || []).map((doc) => ({
+      documentId: doc.document_id,
+      ownerEmail: doc.owner_email,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+      fileSize: doc.file_size,
+      storagePath: doc.storage_path,
+      uploadDate: doc.upload_date,
+      processingStatus: doc.processing_status,
+      processingError: doc.processing_error,
+      chunkCount: doc.chunk_count,
+      metadata: doc.metadata,
+    }));
+
+    return transformedData;
   } catch (error) {
     console.error('Error listing documents:', error);
     return [];
@@ -127,25 +168,37 @@ export async function deleteKnowledgeDocument(documentId) {
 
     const ownerEmail = user.email;
 
-    // Call document processor to delete
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/document-processor`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        operation: 'delete',
-        document_id: documentId,
-        owner_email: ownerEmail,
-      }),
-    });
+    // Get document to find storage path
+    const { data: doc } = await supabase
+      .from('knowledge_documents')
+      .select('storage_path')
+      .eq('document_id', documentId)
+      .eq('owner_email', ownerEmail)
+      .single();
 
-    if (!response.ok) {
-      throw new Error(`Delete failed: ${response.statusText}`);
+    // Delete chunks (CASCADE will handle this, but explicit is better)
+    await supabase.from('knowledge_chunks').delete().eq('document_id', documentId);
+
+    // Delete document record
+    const { error: deleteError } = await supabase
+      .from('knowledge_documents')
+      .delete()
+      .eq('document_id', documentId)
+      .eq('owner_email', ownerEmail);
+
+    if (deleteError) {
+      throw new Error(`Database delete failed: ${deleteError.message}`);
     }
 
-    const result = await response.json();
-    return result;
+    // Delete from storage
+    if (doc && doc.storage_path) {
+      await supabase.storage.from('knowledge-documents').remove([doc.storage_path]);
+    }
+
+    return {
+      success: true,
+      document_id: documentId,
+    };
   } catch (error) {
     console.error('Error deleting document:', error);
     throw error;
@@ -167,34 +220,90 @@ export async function searchRAG(query, meetingId = null, includeDocuments = true
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) {
-      throw new Error('User not authenticated');
+      return {
+        context: 'Please log in to search the knowledge base.',
+        sources: [],
+        has_context: false,
+      };
     }
 
     const ownerEmail = user.email;
+    const contextParts = [];
+    const sources = [];
 
-    // Call RAG query resolver
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/rag-query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query,
-        user_email: ownerEmail,
-        meeting_id: meetingId,
-        include_documents: includeDocuments,
-        include_transcripts: includeTranscripts,
-      }),
-    });
+    // Search documents if requested
+    if (includeDocuments) {
+      // Simple text search in knowledge_chunks (without embeddings for now)
+      const { data: docChunks, error: docError } = await supabase
+        .from('knowledge_chunks')
+        .select('*, knowledge_documents(file_name)')
+        .eq('owner_email', ownerEmail)
+        .textSearch('content', query, { type: 'websearch' })
+        .limit(5);
 
-    if (!response.ok) {
-      throw new Error(`Search failed: ${response.statusText}`);
+      if (!docError && docChunks && docChunks.length > 0) {
+        contextParts.push('# Knowledge Base Documents\n');
+        docChunks.forEach((chunk, idx) => {
+          contextParts.push(`\n[Document ${idx + 1}]`);
+          contextParts.push(chunk.content.substring(0, 500) + '...');
+
+          sources.push({
+            type: 'document',
+            document_id: chunk.document_id,
+            chunk_id: chunk.chunk_id,
+            file_name: chunk.knowledge_documents?.file_name,
+          });
+        });
+      }
     }
 
-    const result = await response.json();
-    return result;
+    // Search meeting transcripts if requested
+    if (includeTranscripts) {
+      const transcriptQuery = supabase
+        .from('transcript_events')
+        .select('*')
+        .eq('is_final', true)
+        .textSearch('transcript', query, { type: 'websearch' })
+        .limit(3);
+
+      if (meetingId) {
+        transcriptQuery.eq('meeting_id', meetingId);
+      }
+
+      const { data: transcripts, error: transError } = await transcriptQuery;
+
+      if (!transError && transcripts && transcripts.length > 0) {
+        if (contextParts.length > 0) {
+          contextParts.push('\n\n# Meeting Transcripts\n');
+        }
+
+        transcripts.forEach((trans, idx) => {
+          contextParts.push(`\n[Transcript ${idx + 1} - ${trans.speaker_name || trans.speaker_number}]`);
+          contextParts.push(trans.transcript);
+
+          sources.push({
+            type: 'transcript',
+            meeting_id: trans.meeting_id,
+            speaker: trans.speaker_name || trans.speaker_number,
+          });
+        });
+      }
+    }
+
+    const context = contextParts.join('\n');
+
+    return {
+      context: context || '',
+      sources,
+      has_context: contextParts.length > 0,
+    };
   } catch (error) {
     console.error('Error searching RAG:', error);
-    throw error;
+    return {
+      context: '',
+      sources: [],
+      has_context: false,
+      error: error.message,
+    };
   }
 }

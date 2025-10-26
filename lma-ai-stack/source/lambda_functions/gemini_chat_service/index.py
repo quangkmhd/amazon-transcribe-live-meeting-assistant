@@ -27,7 +27,7 @@ logger.setLevel(logging.INFO)
 
 # Gemini API Configuration
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-GEMINI_CHAT_MODEL = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-1.5-flash')  # Fast model for real-time
+GEMINI_CHAT_MODEL = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-2.0-flash-exp')  # Fast model for real-time
 GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 # Supabase configuration

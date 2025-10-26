@@ -25,6 +25,7 @@ import { DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, SYSTEM } from '
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
+import useStorageQuota from '../../hooks/use-storage-quota';
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
@@ -41,6 +42,10 @@ const StreamAudio = () => {
     user?.signInUserSession?.refreshToken?.jwtToken || localStorage.getItem('supabase-client-refreshtoken') || '';
 
   const userIdentifier = user?.attributes?.email || DEFAULT_LOCAL_SPEAKER_NAME;
+  const userEmail = user?.attributes?.email || user?.email;
+
+  // Storage quota hook
+  const { isOverQuota, refresh: refreshQuota } = useStorageQuota(userEmail);
 
   const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
@@ -344,6 +349,16 @@ const StreamAudio = () => {
 
   const handleRecording = () => {
     if (!recording) {
+      // Check storage quota before starting recording
+      if (isOverQuota) {
+        alert(
+          'Storage quota exceeded! You have used all of your 2GB storage limit.\n\n' +
+            'Please delete old recordings or documents to free up space before starting a new recording.\n\n' +
+            'You can manage your storage from the sidebar.',
+        );
+        return false;
+      }
+
       // eslint-disable-next-line no-restricted-globals
       agreeToRecord.current = confirm(settings.recordingDisclaimer);
 
@@ -356,6 +371,10 @@ const StreamAudio = () => {
       }
     } else {
       setRecording(!recording);
+      // Refresh quota after stopping recording
+      setTimeout(() => {
+        refreshQuota();
+      }, 2000);
     }
     return recording;
   };

@@ -8,6 +8,7 @@ import { Route, Switch, useLocation } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 import { LMA_VERSION } from '../common/constants';
 import useSettingsContext from '../../contexts/settings';
+import StorageQuotaBar from '../storage-quota-bar';
 
 import {
   CALLS_PATH,
@@ -143,12 +144,15 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
   return (
     <Switch>
       <Route path={CALLS_PATH}>
-        <SideNavigation
-          items={navigationItems}
-          header={header || callsNavHeader}
-          activeHref={activeHref}
-          onFollow={onFollowHandler}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <SideNavigation
+            items={navigationItems}
+            header={header || callsNavHeader}
+            activeHref={activeHref}
+            onFollow={onFollowHandler}
+          />
+          <StorageQuotaBar />
+        </div>
       </Route>
     </Switch>
   );

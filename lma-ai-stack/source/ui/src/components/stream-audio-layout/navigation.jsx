@@ -7,6 +7,7 @@ import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 import { SideNavigation } from '@awsui/components-react';
 import { LMA_VERSION } from '../common/constants';
+import StorageQuotaBar from '../storage-quota-bar';
 
 import {
   CALLS_PATH,
@@ -76,12 +77,15 @@ const Navigation = ({
 }) => (
   <Switch>
     <Route path={STREAM_AUDIO_PATH}>
-      <SideNavigation
-        items={items || callsNavItems}
-        header={header || callsNavHeader}
-        activeHref={activeHref || `#${STREAM_AUDIO_PATH}`}
-        onFollow={onFollowHandler}
-      />
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <SideNavigation
+          items={items || callsNavItems}
+          header={header || callsNavHeader}
+          activeHref={activeHref || `#${STREAM_AUDIO_PATH}`}
+          onFollow={onFollowHandler}
+        />
+        <StorageQuotaBar />
+      </div>
     </Route>
   </Switch>
 );

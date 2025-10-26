@@ -16,12 +16,13 @@ const {
   REACT_APP_AWS_REGION,
 } = process.env;
 
+// Default to dummy values if not set (for Supabase-only mode)
 const awsmobile = {
-  aws_project_region: REACT_APP_AWS_REGION,
-  aws_cognito_identity_pool_id: REACT_APP_IDENTITY_POOL_ID,
-  aws_cognito_region: REACT_APP_AWS_REGION,
-  aws_user_pools_id: REACT_APP_USER_POOL_ID,
-  aws_user_pools_web_client_id: REACT_APP_USER_POOL_CLIENT_ID,
+  aws_project_region: REACT_APP_AWS_REGION || 'ap-southeast-1',
+  aws_cognito_identity_pool_id: REACT_APP_IDENTITY_POOL_ID || 'ap-southeast-1:dummy-identity-pool-id',
+  aws_cognito_region: REACT_APP_AWS_REGION || 'ap-southeast-1',
+  aws_user_pools_id: REACT_APP_USER_POOL_ID || 'ap-southeast-1_dummypool',
+  aws_user_pools_web_client_id: REACT_APP_USER_POOL_CLIENT_ID || 'dummyclientid123456789',
   oauth: {},
   aws_cognito_login_mechanisms: ['PREFERRED_USERNAME'],
   aws_cognito_signup_attributes: ['EMAIL'],
@@ -32,9 +33,10 @@ const awsmobile = {
     passwordPolicyCharacters: [],
   },
   aws_cognito_verification_mechanisms: ['EMAIL'],
-  aws_appsync_graphqlEndpoint: REACT_APP_APPSYNC_GRAPHQL_URL,
-  aws_appsync_region: REACT_APP_AWS_REGION,
-  aws_appsync_authenticationType: 'AMAZON_COGNITO_USER_POOLS',
+  aws_appsync_graphqlEndpoint:
+    REACT_APP_APPSYNC_GRAPHQL_URL || 'https://dummy-appsync.appsync-api.ap-southeast-1.amazonaws.com/graphql',
+  aws_appsync_region: REACT_APP_AWS_REGION || 'ap-southeast-1',
+  aws_appsync_authenticationType: 'AWS_IAM', // Changed from COGNITO to IAM for flexibility
 };
 
 export default awsmobile;

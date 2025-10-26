@@ -236,7 +236,7 @@ def handler(event, context):
             
             # Get Gemini configuration
             gemini_api_key = os.environ.get('GEMINI_API_KEY')
-            gemini_model = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-1.5-flash')
+            gemini_model = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-2.0-flash-exp')
             
             if not gemini_api_key:
                 logger.error("GEMINI_API_KEY not configured")
