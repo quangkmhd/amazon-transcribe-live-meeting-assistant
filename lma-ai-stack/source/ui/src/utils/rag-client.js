@@ -31,7 +31,7 @@ export async function uploadKnowledgeDocument(file) {
     const fileType = file.name.split('.').pop().toLowerCase();
     const documentId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Check storage quota before uploading
+    // Check storage quota before uploading (chunks will count toward quota)
     const quotaCheck = await checkQuotaAvailable(ownerEmail, file.size);
     if (!quotaCheck.isAvailable) {
       const currentUsageFormatted = formatBytes(quotaCheck.currentUsage);
@@ -44,60 +44,67 @@ export async function uploadKnowledgeDocument(file) {
           `Current usage: ${currentUsageFormatted} of ${quotaFormatted}\n` +
           `File size: ${fileSizeFormatted}\n` +
           `Available space: ${availableFormatted}\n\n` +
-          `Please delete old files to free up space before uploading.`,
+          `Please delete old chunks to free up space before uploading.`,
       );
     }
 
-    // Step 1: Upload file to Supabase Storage
-    const storagePath = `${ownerEmail}/${documentId}/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage.from('knowledge-documents').upload(storagePath, file, {
-      cacheControl: '3600',
-      upsert: false,
+    // Read file as base64
+    console.log('Reading file...');
+    const fileContent = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        // Get base64 string (remove data:*/*;base64, prefix)
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
     });
 
-    if (uploadError) {
-      throw new Error(`Storage upload failed: ${uploadError.message}`);
-    }
+    // Send file content directly to Edge Function
+    console.log('Processing document...');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    // Step 2: Create document record in database
-    const { data: docData, error: insertError } = await supabase
-      .from('knowledge_documents')
-      .insert({
+    const edgeFunctionUrl = `${supabase.supabaseUrl}/functions/v1/process-documents`;
+
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token || ''}`,
+        apikey: supabase.supabaseKey,
+      },
+      body: JSON.stringify({
+        file_content: fileContent,
         document_id: documentId,
         owner_email: ownerEmail,
         file_name: fileName,
         file_type: fileType,
         file_size: file.size,
-        storage_path: storagePath,
-        processing_status: 'pending',
-        chunk_count: 0,
-        metadata: {
-          uploaded_via: 'web_ui',
-          file_type: fileType,
-        },
-      })
-      .select()
-      .single();
+      }),
+    });
 
-    if (insertError) {
-      // Cleanup storage if database insert fails
-      await supabase.storage.from('knowledge-documents').remove([storagePath]);
-      throw new Error(`Database insert failed: ${insertError.message}`);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Document processing failed');
     }
 
-    console.log('Document uploaded successfully:', docData);
+    console.log('Document processed successfully:', result);
 
-    // Step 3: Trigger processing (will be done by backend service/Edge Function)
-    // For now, just return success - processing happens asynchronously
     return {
       success: true,
       document_id: documentId,
       filename: fileName,
-      status: 'pending',
+      chunks: result.chunks,
+      processing_time_ms: result.processing_time_ms,
+      status: 'completed',
+      message: 'Document processed successfully.',
     };
   } catch (error) {
-    console.error('Error uploading document:', error);
+    console.error('Error processing document:', error);
     throw error;
   }
 }
@@ -168,14 +175,6 @@ export async function deleteKnowledgeDocument(documentId) {
 
     const ownerEmail = user.email;
 
-    // Get document to find storage path
-    const { data: doc } = await supabase
-      .from('knowledge_documents')
-      .select('storage_path')
-      .eq('document_id', documentId)
-      .eq('owner_email', ownerEmail)
-      .single();
-
     // Delete chunks (CASCADE will handle this, but explicit is better)
     await supabase.from('knowledge_chunks').delete().eq('document_id', documentId);
 
@@ -190,10 +189,7 @@ export async function deleteKnowledgeDocument(documentId) {
       throw new Error(`Database delete failed: ${deleteError.message}`);
     }
 
-    // Delete from storage
-    if (doc && doc.storage_path) {
-      await supabase.storage.from('knowledge-documents').remove([doc.storage_path]);
-    }
+    // No need to delete from storage - we don't store files anymore!
 
     return {
       success: true,
@@ -245,7 +241,7 @@ export async function searchRAG(query, meetingId = null, includeDocuments = true
         contextParts.push('# Knowledge Base Documents\n');
         docChunks.forEach((chunk, idx) => {
           contextParts.push(`\n[Document ${idx + 1}]`);
-          contextParts.push(chunk.content.substring(0, 500) + '...');
+          contextParts.push(`${chunk.content.substring(0, 500)}...`);
 
           sources.push({
             type: 'document',

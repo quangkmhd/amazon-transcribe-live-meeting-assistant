@@ -96,11 +96,10 @@ server.addHook('preHandler', async (request, reply) => {
     // Bypass auth for health check and pipeline-log (internal debug endpoint)
     if (!request.url.includes('health') && !request.url.includes('/api/v1/pipeline-log')) {
         const clientIP = getClientIP(request.headers);
-        server.log.debug(
-            `[AUTH]: [${clientIP}] - Received preHandler hook for authentication. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
-        );
+        // Only log auth attempts if DEBUG_MODE is enabled
+        if (process.env['DEBUG_MODE'] === 'true') {
+            server.log.debug(`[AUTH] ${clientIP} -> ${request.url.split('?')[0]}`);
+        }
 
         await jwtVerifier(request, reply);
     }
@@ -109,14 +108,10 @@ server.addHook('preHandler', async (request, reply) => {
 // Setup Route for websocket connection
 server.get(
     '/api/v1/ws',
-    { websocket: true, logLevel: 'debug' },
+    { websocket: true, logLevel: 'info' },
     (connection, request) => {
         const clientIP = getClientIP(request.headers);
-        server.log.debug(
-            `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
-        );
+        server.log.info(`[WS] New connection from ${clientIP}`);
 
         registerHandlers(clientIP, connection.socket, request); // setup the handler functions for websocket events
     }

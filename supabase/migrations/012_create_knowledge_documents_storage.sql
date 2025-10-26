@@ -17,13 +17,15 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- Storage policies for knowledge-documents bucket
+-- Path structure: temp/{email}/{documentId}/{fileName}
 -- Allow authenticated users to upload documents to their own folder
 CREATE POLICY "Users can upload to their own folder"
 ON storage.objects FOR INSERT
 TO authenticated
 WITH CHECK (
   bucket_id = 'knowledge-documents' AND
-  (storage.foldername(name))[1] = (SELECT auth.jwt() ->> 'email')
+  (storage.foldername(name))[1] = 'temp' AND
+  (storage.foldername(name))[2] = (SELECT auth.jwt() ->> 'email')
 );
 
 -- Allow users to read their own documents
@@ -32,7 +34,8 @@ ON storage.objects FOR SELECT
 TO authenticated
 USING (
   bucket_id = 'knowledge-documents' AND
-  (storage.foldername(name))[1] = (SELECT auth.jwt() ->> 'email')
+  (storage.foldername(name))[1] = 'temp' AND
+  (storage.foldername(name))[2] = (SELECT auth.jwt() ->> 'email')
 );
 
 -- Allow users to update their own documents
@@ -41,11 +44,13 @@ ON storage.objects FOR UPDATE
 TO authenticated
 USING (
   bucket_id = 'knowledge-documents' AND
-  (storage.foldername(name))[1] = (SELECT auth.jwt() ->> 'email')
+  (storage.foldername(name))[1] = 'temp' AND
+  (storage.foldername(name))[2] = (SELECT auth.jwt() ->> 'email')
 )
 WITH CHECK (
   bucket_id = 'knowledge-documents' AND
-  (storage.foldername(name))[1] = (SELECT auth.jwt() ->> 'email')
+  (storage.foldername(name))[1] = 'temp' AND
+  (storage.foldername(name))[2] = (SELECT auth.jwt() ->> 'email')
 );
 
 -- Allow users to delete their own documents
@@ -54,7 +59,8 @@ ON storage.objects FOR DELETE
 TO authenticated
 USING (
   bucket_id = 'knowledge-documents' AND
-  (storage.foldername(name))[1] = (SELECT auth.jwt() ->> 'email')
+  (storage.foldername(name))[1] = 'temp' AND
+  (storage.foldername(name))[2] = (SELECT auth.jwt() ->> 'email')
 );
 
 -- Add RLS policies for knowledge_documents table (if not already present)

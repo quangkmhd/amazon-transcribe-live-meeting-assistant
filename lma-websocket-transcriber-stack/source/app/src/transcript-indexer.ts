@@ -114,7 +114,7 @@ export async function indexTranscriptSegment(segment: TranscriptSegment): Promis
     try {
         // Skip if real-time indexing is disabled
         if (!isIndexingEnabled()) {
-            console.log('[Transcript Indexer] Real-time indexing is disabled');
+            // Indexing is disabled - silent return to reduce console noise
             return false;
         }
 

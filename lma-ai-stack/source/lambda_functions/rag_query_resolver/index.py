@@ -25,6 +25,10 @@ import sys
 sys.path.append('../embedding_service')
 from gemini_embeddings import GeminiEmbeddingService
 
+# Import debug logger
+sys.path.append('../../../../../../utilities')
+from debug_logger import lma_rag_logger, StepTracer
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -39,8 +43,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 class RAGQueryEngine:
     """RAG Query Engine with hybrid search"""
     
-    def __init__(self):
+    def __init__(self, tracer: StepTracer = None):
         self.embedding_service = GeminiEmbeddingService()
+        self.tracer = tracer
+        
+        if self.tracer:
+            lma_rag_logger.debug("RAGQueryEngine initialized", embedding_service="GeminiEmbeddingService")
     
     def search_knowledge_base(
         self,
@@ -61,13 +69,36 @@ class RAGQueryEngine:
         Returns:
             List of matching chunks with metadata
         """
+        if self.tracer:
+            self.tracer.start_step(
+                "Knowledge Base Search",
+                "Hybrid search (vector + full-text) in Supabase",
+                {
+                    "query": query[:100],
+                    "user_email": user_email,
+                    "match_count": match_count,
+                    "vector_weight": vector_weight
+                }
+            )
+        
         try:
             logger.info(f"Searching knowledge base for: {query}")
+            lma_rag_logger.info("Starting knowledge base search", query=query[:100], user=user_email)
             
             # Generate query embedding
+            if self.tracer:
+                self.tracer.add_checkpoint("Generating query embedding")
+            
             query_embedding = self.embedding_service.generate_query_embedding(query)
             
+            lma_rag_logger.debug("Query embedding generated", dimension=len(query_embedding))
+            if self.tracer:
+                self.tracer.add_checkpoint("Embedding generated", {"dimension": len(query_embedding)})
+            
             # Call hybrid search function in Supabase
+            if self.tracer:
+                self.tracer.add_checkpoint("Calling Supabase hybrid_search_knowledge RPC")
+            
             response = supabase.rpc(
                 'hybrid_search_knowledge',
                 {
@@ -79,12 +110,23 @@ class RAGQueryEngine:
                 }
             ).execute()
             
-            logger.info(f"Found {len(response.data)} matching chunks")
+            result_count = len(response.data)
+            logger.info(f"Found {result_count} matching chunks")
+            lma_rag_logger.info("Knowledge base search completed", matches=result_count)
+            
+            if self.tracer:
+                self.tracer.add_checkpoint("Hybrid search completed", {"matches": result_count})
+                self.tracer.end_step(result={"match_count": result_count, "results": response.data[:2]})
             
             return response.data
         
         except Exception as e:
             logger.error(f"Error searching knowledge base: {str(e)}")
+            lma_rag_logger.error("Knowledge base search failed", error=e)
+            
+            if self.tracer:
+                self.tracer.end_step(error=e)
+            
             return []
     
     def search_meeting_transcripts(
@@ -106,13 +148,36 @@ class RAGQueryEngine:
         Returns:
             List of matching transcript chunks
         """
+        if self.tracer:
+            self.tracer.start_step(
+                "Transcript Search",
+                "Search meeting transcripts using vector similarity",
+                {
+                    "query": query[:100],
+                    "user_email": user_email,
+                    "meeting_ids": meeting_ids,
+                    "match_count": match_count
+                }
+            )
+        
         try:
             logger.info(f"Searching meeting transcripts for: {query}")
+            lma_rag_logger.info("Starting transcript search", query=query[:100], meetings=meeting_ids)
             
             # Generate query embedding
+            if self.tracer:
+                self.tracer.add_checkpoint("Generating query embedding")
+            
             query_embedding = self.embedding_service.generate_query_embedding(query)
             
+            lma_rag_logger.debug("Query embedding generated", dimension=len(query_embedding))
+            if self.tracer:
+                self.tracer.add_checkpoint("Embedding generated", {"dimension": len(query_embedding)})
+            
             # Call search function in Supabase
+            if self.tracer:
+                self.tracer.add_checkpoint("Calling Supabase search_meeting_transcripts RPC")
+            
             response = supabase.rpc(
                 'search_meeting_transcripts',
                 {
@@ -123,12 +188,23 @@ class RAGQueryEngine:
                 }
             ).execute()
             
-            logger.info(f"Found {len(response.data)} matching transcript segments")
+            result_count = len(response.data)
+            logger.info(f"Found {result_count} matching transcript segments")
+            lma_rag_logger.info("Transcript search completed", matches=result_count)
+            
+            if self.tracer:
+                self.tracer.add_checkpoint("Transcript search completed", {"matches": result_count})
+                self.tracer.end_step(result={"match_count": result_count, "results": response.data[:2]})
             
             return response.data
         
         except Exception as e:
             logger.error(f"Error searching transcripts: {str(e)}")
+            lma_rag_logger.error("Transcript search failed", error=e)
+            
+            if self.tracer:
+                self.tracer.end_step(error=e)
+            
             return []
     
     def assemble_context(
@@ -156,12 +232,27 @@ class RAGQueryEngine:
         Returns:
             Dict with context and metadata
         """
+        if self.tracer:
+            self.tracer.start_step(
+                "Context Assembly",
+                "Combine retrieved documents and transcripts into unified context",
+                {
+                    "include_documents": include_documents,
+                    "include_transcripts": include_transcripts,
+                    "doc_match_count": doc_match_count,
+                    "transcript_match_count": transcript_match_count
+                }
+            )
+        
         try:
             context_parts = []
             sources = []
             
             # Search knowledge base
             if include_documents:
+                if self.tracer:
+                    self.tracer.add_checkpoint("Searching knowledge base")
+                
                 kb_results = self.search_knowledge_base(
                     query, 
                     user_email, 
@@ -185,9 +276,16 @@ class RAGQueryEngine:
                             'relevance_score': relevance,
                             'excerpt': chunk_text[:200] + '...' if len(chunk_text) > 200 else chunk_text
                         })
+                    
+                    lma_rag_logger.info("Document context added", doc_count=len(kb_results))
+                    if self.tracer:
+                        self.tracer.add_checkpoint("Document context added", {"count": len(kb_results)})
             
             # Search meeting transcripts
             if include_transcripts:
+                if self.tracer:
+                    self.tracer.add_checkpoint("Searching meeting transcripts")
+                
                 meeting_ids = [meeting_id] if meeting_id else None
                 transcript_results = self.search_meeting_transcripts(
                     query,
@@ -215,17 +313,45 @@ class RAGQueryEngine:
                             'similarity_score': result.get('similarity_score', 0),
                             'excerpt': content[:200] + '...' if len(content) > 200 else content
                         })
+                    
+                    lma_rag_logger.info("Transcript context added", transcript_count=len(transcript_results))
+                    if self.tracer:
+                        self.tracer.add_checkpoint("Transcript context added", {"count": len(transcript_results)})
             
             context = "\n".join(context_parts)
+            context_length = len(context)
             
-            return {
+            lma_rag_logger.info(
+                "Context assembly completed",
+                context_length=context_length,
+                source_count=len(sources),
+                has_context=len(context_parts) > 0
+            )
+            
+            result = {
                 'context': context,
                 'sources': sources,
-                'has_context': len(context_parts) > 0
+                'has_context': len(context_parts) > 0,
+                'context_length': context_length,
+                'source_count': len(sources)
             }
+            
+            if self.tracer:
+                self.tracer.end_step(result={
+                    "context_length": context_length,
+                    "source_count": len(sources),
+                    "has_context": len(context_parts) > 0
+                })
+            
+            return result
         
         except Exception as e:
             logger.error(f"Error assembling context: {str(e)}")
+            lma_rag_logger.error("Context assembly failed", error=e)
+            
+            if self.tracer:
+                self.tracer.end_step(error=e)
+            
             return {
                 'context': '',
                 'sources': [],
@@ -246,11 +372,32 @@ def lambda_handler(event, context):
         "include_documents": true,
         "include_transcripts": true,
         "doc_match_count": 5,
-        "transcript_match_count": 3
+        "transcript_match_count": 3,
+        "enable_debug": false
     }
     """
+    # Start execution trace
+    enable_debug = event.get('enable_debug', False)
+    tracer = None
+    
+    if enable_debug:
+        tracer = lma_rag_logger.start_trace("LMA_RAG_QUERY")
+        tracer.start_step(
+            "Lambda Handler - RAG Query",
+            "Process RAG query request from API Gateway",
+            {
+                "query": event.get('query', '')[:100],
+                "user_email": event.get('user_email'),
+                "meeting_id": event.get('meeting_id')
+            }
+        )
+    
     try:
         logger.info(f"RAG Query Resolver - Processing event")
+        lma_rag_logger.info("RAG Query Resolver started", enable_debug=enable_debug)
+        
+        if tracer:
+            tracer.add_checkpoint("Parsing event parameters")
         
         query = event.get('query', '')
         user_email = event.get('user_email')
@@ -261,6 +408,12 @@ def lambda_handler(event, context):
         transcript_match_count = event.get('transcript_match_count', 3)
         
         if not query or not user_email:
+            lma_rag_logger.warning("Missing required parameters", query=bool(query), user_email=bool(user_email))
+            
+            if tracer:
+                tracer.end_step(error=Exception("Missing required parameters"))
+                lma_rag_logger.end_trace(tracer.session_id)
+            
             return {
                 'statusCode': 400,
                 'body': json.dumps({
@@ -268,7 +421,12 @@ def lambda_handler(event, context):
                 })
             }
         
-        engine = RAGQueryEngine()
+        if tracer:
+            tracer.add_checkpoint("Parameters validated")
+            tracer.end_step(result={"query_length": len(query), "params_valid": True})
+        
+        # Create engine with tracer
+        engine = RAGQueryEngine(tracer=tracer)
         
         # Assemble context
         result = engine.assemble_context(
@@ -281,6 +439,12 @@ def lambda_handler(event, context):
             transcript_match_count=transcript_match_count
         )
         
+        lma_rag_logger.info("RAG Query completed successfully", has_context=result.get('has_context'))
+        
+        # End trace
+        if tracer:
+            lma_rag_logger.end_trace(tracer.session_id)
+        
         return {
             'statusCode': 200,
             'body': json.dumps(result)
@@ -288,6 +452,11 @@ def lambda_handler(event, context):
     
     except Exception as e:
         logger.error(f"Error in RAG query resolver: {str(e)}")
+        lma_rag_logger.error("RAG Query failed", error=e)
+        
+        if tracer:
+            lma_rag_logger.end_trace(tracer.session_id)
+        
         return {
             'statusCode': 500,
             'body': json.dumps({

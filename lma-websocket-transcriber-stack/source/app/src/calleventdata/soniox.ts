@@ -27,7 +27,9 @@ function logTranscriptDebug(
     stage: string,
     data: any
 ): void {
-    if (!ENABLE_TRANSCRIPT_DEBUG) return;
+    if (!ENABLE_TRANSCRIPT_DEBUG) {
+        return;
+    }
 
     try {
         if (!existsSync(DEBUG_LOG_DIR)) {
@@ -114,7 +116,7 @@ export const startSonioxTranscription = async (
             const result = JSON.parse(data.toString());
             
             // 🔥 DEBUG: Log EVERY message from Soniox
-            console.log(`🔥 [SONIOX MESSAGE] Received from Soniox:`, {
+            console.log('🔥 [SONIOX MESSAGE] Received from Soniox:', {
                 hasTokens: !!result.tokens,
                 tokenCount: result.tokens?.length || 0,
                 finished: result.finished,

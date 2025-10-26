@@ -49,7 +49,7 @@ export async function insertTranscriptEvent(data: {
     if (error) {
         // Log DB insert error
         logger.logDBInsertError(data.meeting_id, error.message, duration);
-        console.error(`❌ [DB INSERT ERROR]:`, error);
+        console.error('❌ [DB INSERT ERROR]:', error);
         throw new Error(error.message);
     }
     
@@ -83,7 +83,9 @@ export async function upsertMeeting(data: {
     const { error } = await supabase.from('meetings').upsert(data, {
         onConflict: 'meeting_id',
     });
-    if (error) throw new Error(error.message);
+    if (error) {
+        throw new Error(error.message);
+    }
 }
 
 // Calculate meeting duration from transcript segments
@@ -120,7 +122,9 @@ export async function updateMeetingEnd(meeting_id: string) {
         })
         .eq('meeting_id', meeting_id);
     
-    if (error) throw error;
+    if (error) {
+        throw error;
+    }
     
     console.log(`✅ [MEETING] ${meeting_id} ended - Duration: ${durationMs}ms (${(durationMs / 1000).toFixed(1)}s)`);
 }
@@ -142,7 +146,9 @@ export async function updateMeetingRecording(
             ended_at: new Date().toISOString(),
         })
         .eq('meeting_id', meeting_id);
-    if (error) throw error;
+    if (error) {
+        throw error;
+    }
 }
 
 // Upload recording to Supabase Storage
@@ -159,7 +165,9 @@ export async function uploadRecording(
             upsert: false,
         });
 
-    if (uploadError) throw new Error(uploadError.message);
+    if (uploadError) {
+        throw new Error(uploadError.message);
+    }
 
     const {
         data: { publicUrl },

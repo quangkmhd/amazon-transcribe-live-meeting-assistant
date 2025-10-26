@@ -18,6 +18,10 @@ import requests
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Import debug logger
+sys.path.append('../../../../../../utilities')
+from debug_logger import meeting_assistant_logger, StepTracer
+
 # Gemini API Configuration
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GEMINI_CHAT_MODEL = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-2.0-flash-exp')  # Fast model for real-time
@@ -136,18 +140,27 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
 
 
 @with_stage("retriever_transcript")
-def get_live_transcript_context(call_id: str, last_n_segments: int = 20) -> str:
+def get_live_transcript_context(call_id: str, last_n_segments: int = 20, tracer: StepTracer = None) -> str:
     """
     Fetch recent transcript segments from live meeting
     
     Args:
         call_id: Meeting/Call ID
         last_n_segments: Number of recent segments to retrieve
+        tracer: Optional step tracer for debugging
     
     Returns:
         Formatted transcript string
     """
+    if tracer:
+        tracer.start_step(
+            "Live Transcript Retrieval",
+            f"Fetch last {last_n_segments} segments from current meeting",
+            {"call_id": call_id, "last_n_segments": last_n_segments}
+        )
+    
     try:
+        meeting_assistant_logger.info("Fetching live transcript", call_id=call_id, segments=last_n_segments)
         # Query Supabase for recent final transcript events
         response = supabase.table('transcript_events')\
             .select('*')\
@@ -179,7 +192,7 @@ def get_live_transcript_context(call_id: str, last_n_segments: int = 20) -> str:
 
 
 @with_stage("context_assembler")
-def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) -> Dict[str, Any]:
+def assemble_meeting_context(user_query: str, call_id: str, owner_email: str, tracer: StepTracer = None) -> Dict[str, Any]:
     """
     Assemble unified context from live transcript + RAG knowledge base
     
@@ -187,23 +200,45 @@ def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) ->
         user_query: User's question
         call_id: Meeting ID
         owner_email: User's email for RAG filtering
+        tracer: Optional step tracer for debugging
     
     Returns:
         Dict with combined context and sources
     """
+    if tracer:
+        tracer.start_step(
+            "Meeting Context Assembly",
+            "Combine live transcript and RAG knowledge base",
+            {
+                "query": user_query[:100],
+                "call_id": call_id,
+                "owner_email": owner_email
+            }
+        )
+    
     try:
+        meeting_assistant_logger.info("Assembling meeting context", query=user_query[:100], call_id=call_id)
+        
         # Import RAG query engine
         import sys
         sys.path.append('../../rag_query_resolver')
         from index import RAGQueryEngine
         
         # 1. Get live transcript (recent conversation)
+        if tracer:
+            tracer.add_checkpoint("Fetching live transcript")
+        
         logger.info(f"Fetching live transcript for call {call_id}")
-        live_transcript = get_live_transcript_context(call_id, last_n_segments=20)
+        live_transcript = get_live_transcript_context(call_id, last_n_segments=20, tracer=tracer)
+        
+        meeting_assistant_logger.debug("Live transcript fetched", transcript_length=len(live_transcript) if live_transcript else 0)
         
         # 2. Get RAG context (documents + indexed transcripts)
+        if tracer:
+            tracer.add_checkpoint("Querying RAG knowledge base")
+        
         logger.info(f"Querying RAG knowledge base for: {user_query}")
-        rag_engine = RAGQueryEngine()
+        rag_engine = RAGQueryEngine(tracer=tracer)
         rag_result = rag_engine.assemble_context(
             query=user_query,
             user_email=owner_email,
@@ -214,20 +249,40 @@ def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) ->
             transcript_match_count=2
         )
         
+        meeting_assistant_logger.debug(
+            "RAG context retrieved",
+            has_context=rag_result.get('has_context'),
+            source_count=len(rag_result.get('sources', []))
+        )
+        
         # 3. Combine contexts intelligently
+        if tracer:
+            tracer.add_checkpoint("Combining contexts")
+        
         context_parts = []
         
         # Always include live transcript first (most recent context)
         if live_transcript:
             context_parts.append("# Current Meeting Conversation (Last 20 messages)")
             context_parts.append(live_transcript)
+            if tracer:
+                tracer.add_checkpoint("Live transcript added", {"length": len(live_transcript)})
         
         # Add RAG context if available
         if rag_result.get('has_context') and rag_result.get('context'):
             context_parts.append("\n\n# Additional Context from Knowledge Base")
             context_parts.append(rag_result['context'])
+            if tracer:
+                tracer.add_checkpoint("RAG context added", {"length": len(rag_result['context'])})
         
         combined_context = "\n".join(context_parts)
+        
+        meeting_assistant_logger.info(
+            "Context assembly completed",
+            context_length=len(combined_context),
+            has_live=bool(live_transcript),
+            has_rag=rag_result.get('has_context', False)
+        )
         
         # Structured log: context stats
         try:
@@ -244,17 +299,33 @@ def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) ->
         except Exception:
             pass
 
-        return {
+        result = {
             'context': combined_context,
             'live_transcript': live_transcript,
             'rag_context': rag_result.get('context', ''),
             'sources': rag_result.get('sources', []),
             'has_live_transcript': bool(live_transcript),
-            'has_rag_context': rag_result.get('has_context', False)
+            'has_rag_context': rag_result.get('has_context', False),
+            'context_length': len(combined_context)
         }
+        
+        if tracer:
+            tracer.end_step(result={
+                "context_length": len(combined_context),
+                "has_live": bool(live_transcript),
+                "has_rag": rag_result.get('has_context', False),
+                "source_count": len(rag_result.get('sources', []))
+            })
+        
+        return result
     
     except Exception as e:
         logger.error(f"Error assembling meeting context: {str(e)}")
+        meeting_assistant_logger.error("Context assembly failed", error=e)
+        
+        if tracer:
+            tracer.end_step(error=e)
+        
         # Fallback to just live transcript
         live_transcript = get_live_transcript_context(call_id, last_n_segments=20)
         return {

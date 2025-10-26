@@ -285,12 +285,6 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
             loading={props.loading}
             onClick={() => props.setIsLoading(true)}
           />
-          <Button
-            iconName="download"
-            variant="normal"
-            loading={props.loading}
-            onClick={() => props.downloadToExcel()}
-          />
           {shareModal(props)}
           {deleteModal(props)}
         </SpaceBetween>

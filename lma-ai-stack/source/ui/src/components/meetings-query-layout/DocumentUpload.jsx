@@ -18,20 +18,57 @@ import {
 } from '@awsui/components-react';
 import { uploadKnowledgeDocument, listKnowledgeDocuments, deleteKnowledgeDocument } from '../../utils/rag-client';
 
+// Enhanced file type support - integrated from RAGFlow
 const SUPPORTED_FILE_TYPES = [
-  { ext: 'pdf', mime: 'application/pdf', label: 'PDF' },
-  { ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', label: 'Word' },
+  // Documents
+  { ext: 'pdf', mime: 'application/pdf', label: 'PDF', category: 'Documents' },
+  {
+    ext: 'docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    label: 'Word',
+    category: 'Documents',
+  },
   {
     ext: 'pptx',
     mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     label: 'PowerPoint',
+    category: 'Documents',
   },
-  { ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', label: 'Excel' },
-  { ext: 'txt', mime: 'text/plain', label: 'Text' },
-  { ext: 'md', mime: 'text/markdown', label: 'Markdown' },
+  {
+    ext: 'xlsx',
+    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    label: 'Excel',
+    category: 'Documents',
+  },
+  // Text formats
+  { ext: 'txt', mime: 'text/plain', label: 'Text', category: 'Text' },
+  { ext: 'md', mime: 'text/markdown', label: 'Markdown', category: 'Text' },
+  { ext: 'markdown', mime: 'text/markdown', label: 'Markdown', category: 'Text' },
+  // Structured data
+  { ext: 'html', mime: 'text/html', label: 'HTML', category: 'Web' },
+  { ext: 'htm', mime: 'text/html', label: 'HTML', category: 'Web' },
+  { ext: 'json', mime: 'application/json', label: 'JSON', category: 'Data' },
+  { ext: 'jsonl', mime: 'application/jsonlines', label: 'JSON Lines', category: 'Data' },
+  { ext: 'csv', mime: 'text/csv', label: 'CSV', category: 'Data' },
+  // Code files
+  { ext: 'py', mime: 'text/x-python', label: 'Python', category: 'Code' },
+  { ext: 'js', mime: 'text/javascript', label: 'JavaScript', category: 'Code' },
+  { ext: 'ts', mime: 'text/typescript', label: 'TypeScript', category: 'Code' },
+  { ext: 'java', mime: 'text/x-java', label: 'Java', category: 'Code' },
+  { ext: 'cpp', mime: 'text/x-c++', label: 'C++', category: 'Code' },
+  { ext: 'go', mime: 'text/x-go', label: 'Go', category: 'Code' },
+  { ext: 'rs', mime: 'text/x-rust', label: 'Rust', category: 'Code' },
+  { ext: 'php', mime: 'text/x-php', label: 'PHP', category: 'Code' },
+  { ext: 'sh', mime: 'text/x-sh', label: 'Shell', category: 'Code' },
+  { ext: 'sql', mime: 'text/x-sql', label: 'SQL', category: 'Code' },
 ];
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+// Get accept string for file input
+const getAcceptString = () => {
+  return SUPPORTED_FILE_TYPES.map((t) => `.${t.ext}`).join(',');
+};
 
 // Delete button cell renderer
 const DeleteActionCell = ({ item, onDelete }) => (
@@ -65,6 +102,10 @@ const DocumentUpload = () => {
   };
 
   const handleFiles = (files) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
     const fileArray = Array.from(files);
 
     // Validate files
@@ -72,6 +113,12 @@ const DocumentUpload = () => {
     const errors = [];
 
     fileArray.forEach((file) => {
+      // Safety check: file name exists
+      if (!file.name) {
+        errors.push('Invalid file: no filename');
+        return;
+      }
+
       const ext = file.name.split('.').pop().toLowerCase();
       const supportedType = SUPPORTED_FILE_TYPES.find((type) => type.ext === ext);
 
@@ -82,6 +129,12 @@ const DocumentUpload = () => {
 
       if (file.size > MAX_FILE_SIZE) {
         errors.push(`${file.name}: File too large (max 50MB)`);
+        return;
+      }
+
+      // Safety check: file has content
+      if (file.size === 0) {
+        errors.push(`${file.name}: Empty file`);
         return;
       }
 
@@ -145,20 +198,53 @@ const DocumentUpload = () => {
     setError(null);
     setUploadProgress(0);
 
+    const results = [];
+    const errors = [];
+
     try {
       // eslint-disable-next-line no-plusplus
       for (let i = 0; i < selectedFiles.length; i += 1) {
         const file = selectedFiles[i];
-        const progress = ((i + 1) / selectedFiles.length) * 100;
+        const baseProgress = (i / selectedFiles.length) * 100;
+        const fileProgress = (1 / selectedFiles.length) * 100;
 
-        setUploadProgress(progress);
+        setUploadProgress(baseProgress);
 
-        // eslint-disable-next-line no-await-in-loop
-        await uploadKnowledgeDocument(file);
+        try {
+          console.log(`Processing ${file.name}...`);
+
+          // eslint-disable-next-line no-await-in-loop
+          const result = await uploadKnowledgeDocument(file);
+
+          results.push({
+            fileName: file.name,
+            success: true,
+            chunks: result.chunks,
+            processingTime: result.processing_time_ms,
+          });
+
+          setUploadProgress(baseProgress + fileProgress);
+        } catch (fileError) {
+          console.error(`Error processing ${file.name}:`, fileError);
+          errors.push({
+            fileName: file.name,
+            error: fileError.message,
+          });
+        }
       }
 
       // Reload documents list
       await loadDocuments();
+
+      // Show results
+      if (results.length > 0) {
+        console.log('Successfully processed:', results);
+      }
+
+      if (errors.length > 0) {
+        const errorMsg = errors.map((e) => `${e.fileName}: ${e.error}`).join('\n');
+        setError(`Some files failed to process:\n${errorMsg}`);
+      }
 
       setSelectedFiles([]);
       setUploadProgress(100);
@@ -166,7 +252,10 @@ const DocumentUpload = () => {
       setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
-      }, 1000);
+        if (errors.length === 0) {
+          setError(null);
+        }
+      }, 2000);
     } catch (err) {
       console.error('Upload error:', err);
       setError(`Upload failed: ${err.message}`);
@@ -262,7 +351,13 @@ const DocumentUpload = () => {
   return (
     <Container
       header={
-        <Header variant="h2" description="Upload documents to enhance the chatbot's knowledge base">
+        <Header
+          variant="h2"
+          description={
+            "Upload documents to enhance the chatbot's knowledge base. " +
+            'Files are processed immediately and automatically deleted after chunking.'
+          }
+        >
           Knowledge Base Documents
         </Header>
       }
@@ -309,12 +404,22 @@ const DocumentUpload = () => {
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.docx,.pptx,.xlsx,.txt,.md"
+              accept={getAcceptString()}
               onChange={handleFileChange}
               style={{ display: 'none' }}
             />
             <Box variant="small" color="text-body-secondary" padding={{ top: 's' }}>
-              Supported: PDF, DOCX, PPTX, XLSX, TXT, MD (max 50MB each)
+              <strong>Supported formats (max 50MB each):</strong>
+              <br />
+              📄 Documents: PDF, DOCX, PPTX, XLSX
+              <br />
+              📝 Text: TXT, MD, HTML
+              <br />
+              📊 Data: JSON, JSONL, CSV
+              <br />
+              💻 Code: Python, JavaScript, TypeScript, Java, C++, Go, Rust, PHP, Shell, SQL
+              <br />
+              <em>✨ NEW: Automatically extracts embedded files from DOCX/XLSX!</em>
             </Box>
           </div>
 
@@ -340,8 +445,8 @@ const DocumentUpload = () => {
             <Box padding={{ top: 'm' }}>
               <ProgressBar
                 value={uploadProgress}
-                label="Uploading..."
-                description="Please wait while documents are being processed"
+                label="Processing documents..."
+                description="Parsing → Chunking → Generating embeddings → Saving to database → Deleting files"
               />
             </Box>
           )}

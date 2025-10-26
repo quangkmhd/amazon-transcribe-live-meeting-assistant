@@ -23,7 +23,11 @@ except ImportError:
     from supabase import create_client, Client
 
 # Import our custom modules
-from document_parsers import DocumentParserFactory, TextChunker
+from document_parsers import (
+    DocumentParserFactory, 
+    TextChunker,
+    extract_embedded_files
+)
 
 # Import embedding service
 import sys
@@ -42,35 +46,79 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
 class DocumentProcessor:
-    """Main document processing pipeline"""
+    """
+    Enhanced Document Processing Pipeline
+    Features: Context-aware chunking, Embedded file extraction, 30+ file formats
+    
+    ALL FEATURES ARE LIGHTWEIGHT - NO GPU/ML MODELS REQUIRED
+    """
     
     def __init__(self):
         self.parser_factory = DocumentParserFactory()
         self.chunker = TextChunker(chunk_size=512, overlap=50)
         self.embedding_service = GeminiEmbeddingService()
+        self.max_recursion_depth = 2  # Limit embedded file recursion
     
     def process_document(
         self, 
         file_content: bytes, 
         filename: str, 
         owner_email: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        recursion_depth: int = 0
     ) -> Dict[str, Any]:
         """
-        Process a document: parse, chunk, embed, and store
+        Enhanced document processing with embedded file extraction and context-aware chunking
+        
+        NEW FEATURES (all lightweight):
+        - Extracts and processes embedded files (DOCX with embedded PDFs, etc.)
+        - Context-aware chunking (preserves heading hierarchy)
+        - Table location tracking
+        - 30+ file format support
         
         Args:
             file_content: Binary content of the file
             filename: Original filename
             owner_email: Email of document owner
             metadata: Optional metadata (author, title, etc.)
+            recursion_depth: Current recursion depth for embedded files
         
         Returns:
             Dict with processing results
         """
         try:
             document_id = str(uuid.uuid4())
-            logger.info(f"Processing document {filename} (ID: {document_id})")
+            logger.info(f"Processing document {filename} (ID: {document_id}, depth: {recursion_depth})")
+            
+            # Step 0: Extract embedded files (NEW FEATURE)
+            embedded_results = []
+            if recursion_depth < self.max_recursion_depth:
+                logger.info("Step 0: Checking for embedded files...")
+                embedded_files = extract_embedded_files(file_content)
+                
+                if embedded_files:
+                    logger.info(f"Found {len(embedded_files)} embedded files")
+                    for embed_name, embed_content in embedded_files:
+                        try:
+                            # Safety: Skip if embedded content is too small (likely corrupt)
+                            if len(embed_content) < 100:
+                                logger.warning(f"Skipping tiny embedded file {embed_name}: {len(embed_content)} bytes")
+                                continue
+                            
+                            # Process embedded file recursively
+                            embed_result = self.process_document(
+                                embed_content,
+                                embed_name,
+                                owner_email,
+                                {'parent_document': filename, 'embedded': True},
+                                recursion_depth + 1
+                            )
+                            if embed_result['success']:
+                                embedded_results.append(embed_result)
+                            else:
+                                logger.warning(f"Embedded file {embed_name} failed: {embed_result.get('error', 'Unknown error')}")
+                        except Exception as e:
+                            logger.error(f"Exception processing embedded file {embed_name}: {e}", exc_info=True)
             
             # Step 1: Parse document
             logger.info("Step 1: Parsing document...")
@@ -86,6 +134,10 @@ class DocumentProcessor:
             file_size = len(file_content)
             file_type = filename.split('.')[-1].lower()
             
+            doc_metadata = metadata or {}
+            doc_metadata['embedded_file_count'] = len(embedded_results)
+            doc_metadata['recursion_depth'] = recursion_depth
+            
             doc_record = {
                 'document_id': document_id,
                 'owner_email': owner_email,
@@ -94,42 +146,55 @@ class DocumentProcessor:
                 'file_size': file_size,
                 'storage_path': f"{owner_email}/{document_id}/{filename}",
                 'processing_status': 'processing',
-                'metadata': metadata or {}
+                'metadata': doc_metadata
             }
             
             response = supabase.table('knowledge_documents').insert(doc_record).execute()
             logger.info(f"Created document record: {response.data}")
             
-            # Step 3: Chunk text
-            logger.info("Step 3: Chunking text...")
-            chunks = self.chunker.chunk_text(text, strategy='paragraphs')
-            logger.info(f"Created {len(chunks)} chunks")
+            # Step 3: Context-aware chunking (NEW FEATURE)
+            logger.info("Step 3: Context-aware chunking...")
+            enhanced_chunks = self.chunker.chunk_text_with_context(
+                text, 
+                filename, 
+                strategy='paragraphs'
+            )
+            logger.info(f"Created {len(enhanced_chunks)} context-aware chunks")
             
-            # Step 4: Generate embeddings
+            # Step 4: Generate embeddings (use enhanced text with context)
             logger.info("Step 4: Generating embeddings...")
+            chunk_texts = [c['enhanced_text'] for c in enhanced_chunks]
             embeddings = self.embedding_service.generate_embeddings_batch(
-                chunks, 
+                chunk_texts, 
                 task_type="RETRIEVAL_DOCUMENT"
             )
             logger.info(f"Generated {len(embeddings)} embeddings")
             
-            # Step 5: Store chunks with embeddings
+            # SAFETY CHECK: Verify embeddings count matches chunks count
+            if len(embeddings) != len(enhanced_chunks):
+                error_msg = f"Embedding count mismatch: {len(embeddings)} embeddings for {len(enhanced_chunks)} chunks"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Step 5: Store chunks with embeddings and context
             logger.info("Step 5: Storing chunks...")
             chunk_records = []
             
-            for idx, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+            for idx, (chunk_data, embedding) in enumerate(zip(enhanced_chunks, embeddings)):
                 chunk_id = f"{document_id}_{idx}"
                 chunk_record = {
                     'chunk_id': chunk_id,
                     'document_id': document_id,
                     'owner_email': owner_email,
                     'chunk_index': idx,
-                    'content': chunk_text,
-                    'content_length': len(chunk_text),
+                    'content': chunk_data['content'],
+                    'content_length': len(chunk_data['content']),
                     'embedding': embedding,
                     'metadata': {
                         'chunk_index': idx,
-                        'total_chunks': len(chunks)
+                        'total_chunks': len(enhanced_chunks),
+                        'context': chunk_data['context'],  # NEW: Store context
+                        'enhanced_text': chunk_data['enhanced_text']  # NEW: Store enhanced version
                     }
                 }
                 chunk_records.append(chunk_record)
@@ -143,7 +208,7 @@ class DocumentProcessor:
             logger.info("Step 6: Updating document status...")
             supabase.table('knowledge_documents').update({
                 'processing_status': 'completed',
-                'chunk_count': len(chunks)
+                'chunk_count': len(enhanced_chunks)
             }).eq('document_id', document_id).execute()
             
             logger.info(f"Document processing completed: {document_id}")
@@ -152,8 +217,10 @@ class DocumentProcessor:
                 'success': True,
                 'document_id': document_id,
                 'filename': filename,
-                'chunk_count': len(chunks),
-                'total_characters': len(text)
+                'chunk_count': len(enhanced_chunks),
+                'total_characters': len(text),
+                'embedded_documents': len(embedded_results),
+                'embedded_results': embedded_results
             }
         
         except Exception as e:

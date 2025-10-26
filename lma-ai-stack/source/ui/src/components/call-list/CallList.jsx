@@ -14,7 +14,6 @@ import useSettingsContext from '../../contexts/settings';
 import mapCallsAttributes from '../common/map-call-attributes';
 import { paginationLabels } from '../common/labels';
 import useLocalStorage from '../common/local-storage';
-import { exportToExcel } from '../common/download-func';
 
 import {
   CallsPreferences,
@@ -95,7 +94,6 @@ const CallList = () => {
           periodsToLoad={periodsToLoad}
           setPeriodsToLoad={setPeriodsToLoad}
           getCallDetailsFromCallIds={getCallDetailsFromCallIds}
-          downloadToExcel={() => exportToExcel(callList, 'Meeting-List')}
           // eslint-disable-next-line max-len, prettier/prettier
         />
       }

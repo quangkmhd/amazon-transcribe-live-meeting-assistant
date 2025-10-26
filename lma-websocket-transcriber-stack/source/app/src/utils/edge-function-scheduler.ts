@@ -41,14 +41,11 @@ async function triggerEdgeFunction(): Promise<void> {
 
         if (response.ok) {
             if (result.processed && result.processed > 0) {
-                console.log(`[EDGE SCHEDULER] Processed ${result.processed} events in ${duration}ms`);
+                console.log(`[EDGE] Processed ${result.processed} events (${duration}ms)`);
             }
-            // Bỏ qua log khi 0 events để giảm spam
-            // else {
-            //     console.debug(`[EDGE SCHEDULER] Ran successfully (0 events) in ${duration}ms`);
-            // }
+            // Silent when 0 events to reduce console noise
         } else {
-            console.error(`[EDGE SCHEDULER] Failed: ${response.status} ${response.statusText}`, result);
+            console.error(`[EDGE] Error ${response.status}:`, result);
         }
     } catch (error) {
         const duration = Date.now() - startTime;
@@ -67,8 +64,7 @@ export function startEdgeFunctionScheduler(): void {
         return;
     }
 
-    console.log(`[EDGE SCHEDULER] Starting (every ${INTERVAL_MS}ms)`);
-    console.log(`[EDGE SCHEDULER] URL: ${EDGE_FUNCTION_URL}`);
+    console.log(`[EDGE] Scheduler started (${INTERVAL_MS}ms interval)`);
 
     // Run immediately on start
     triggerEdgeFunction();
@@ -77,8 +73,6 @@ export function startEdgeFunctionScheduler(): void {
     schedulerInterval = setInterval(() => {
         triggerEdgeFunction();
     }, INTERVAL_MS);
-
-    console.log('[EDGE SCHEDULER] Started successfully');
 }
 
 /**
