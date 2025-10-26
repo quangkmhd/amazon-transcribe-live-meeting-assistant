@@ -172,6 +172,8 @@ type Mutation @aws_iam {
 	endVirtualParticipant(input: EndVirtualParticipantInput!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
+	uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentOutput @aws_cognito_user_pools
+	deleteKnowledgeDocument(input: DeleteKnowledgeDocumentInput!): DeleteKnowledgeDocumentOutput @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -201,6 +203,8 @@ type Query @aws_cognito_user_pools
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
+	listKnowledgeDocuments: KnowledgeDocumentList @aws_cognito_user_pools
+	searchRAG(input: RAGQueryInput!): RAGSearchResult @aws_cognito_user_pools
 }
 
 type VirtualParticipant @aws_cognito_user_pools @aws_iam {
@@ -522,6 +526,62 @@ type ChatToken @aws_cognito_user_pools @aws_iam {
 	Timestamp: AWSDateTime!
 }
 
+# RAG Knowledge Base Types
+type KnowledgeDocument @aws_cognito_user_pools @aws_iam {
+	documentId: ID!
+	ownerEmail: String!
+	fileName: String!
+	fileType: String!
+	fileSize: Int!
+	storagePath: String!
+	uploadDate: AWSDateTime!
+	processingStatus: String!
+	processingError: String
+	chunkCount: Int!
+	metadata: String
+}
+
+type KnowledgeDocumentList @aws_cognito_user_pools @aws_iam {
+	documents: [KnowledgeDocument]
+	totalCount: Int!
+}
+
+input UploadKnowledgeDocumentInput {
+	fileName: String!
+	fileContent: String!
+	fileType: String!
+	metadata: String
+}
+
+type UploadKnowledgeDocumentOutput @aws_cognito_user_pools @aws_iam {
+	documentId: ID!
+	fileName: String!
+	processingStatus: String!
+	message: String
+}
+
+input DeleteKnowledgeDocumentInput {
+	documentId: ID!
+}
+
+type DeleteKnowledgeDocumentOutput @aws_cognito_user_pools @aws_iam {
+	documentId: ID!
+	success: Boolean!
+	message: String
+}
+
+type RAGSearchResult @aws_cognito_user_pools @aws_iam {
+	context: String!
+	sources: String!
+	hasContext: Boolean!
+}
+
+input RAGQueryInput {
+	query: String!
+	meetingId: ID
+	includeDocuments: Boolean
+	includeTranscripts: Boolean
+}
 
 schema {
 	query: Query

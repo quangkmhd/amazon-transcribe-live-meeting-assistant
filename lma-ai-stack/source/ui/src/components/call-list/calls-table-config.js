@@ -269,8 +269,7 @@ export const CallsCommonHeader = ({ resourceName = 'Meetings', ...props }) => {
   };
 
   // eslint-disable-next-line
-  const periodText =
-    TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  const periodText = TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
 
   return (
     <TableHeader

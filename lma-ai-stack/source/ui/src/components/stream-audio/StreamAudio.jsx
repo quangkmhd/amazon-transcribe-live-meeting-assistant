@@ -246,7 +246,9 @@ const StreamAudio = () => {
       recordingCallMetaData.callEvent = 'START';
 
       // eslint-disable-next-line prettier/prettier
-      console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`);
+      console.log(
+        `DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`,
+      );
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 

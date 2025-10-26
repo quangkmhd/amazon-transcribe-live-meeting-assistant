@@ -19,9 +19,9 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
+# Initialize AWS clients (DshieldoDB only - Bedrock removed)
 dynamodb = boto3.resource('dynamodb')
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+# bedrock_agent_runtime - REMOVED: No longer using AWS Bedrock
 
 # Get AppSync endpoint from environment
 APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
@@ -118,62 +118,74 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
         logger.error(f"Error fetching transcript: {str(e)}")
         return ""
 
-def query_knowledge_base(user_input: str, call_id: str) -> str:
+def query_knowledge_base(user_input: str, call_id: str, owner_email: str = 'unknown@example.com') -> str:
     """
-    Query Bedrock Knowledge Base for relevant context
+    Query RAG Knowledge Base using Supabase pgvector + Gemini embeddings
+    Replaces AWS Bedrock Knowledge Base
     """
     try:
-        kb_id = os.environ.get('KB_ID')
-        if not kb_id:
+        # Import RAG query engine
+        from supabase import create_client
+        
+        # Initialize Supabase client
+        supabase_url = os.environ.get('SUPABASE_URL')
+        supabase_key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            logger.warning("Supabase not configured for RAG")
             return ""
         
-        model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
-        kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
-        kb_account_id = os.environ.get('KB_ACCOUNT_ID')
+        supabase = create_client(supabase_url, supabase_key)
         
-        # Determine model ARN based on model type
-        if model_id.startswith("anthropic"):
-            model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-        else:
-            model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+        # Import embedding service
+        import sys
+        import os
+        rag_path = os.path.join(os.path.dirname(__file__), '../../lma-ai-stack/source/lambda_functions/embedding_service')
+        if rag_path not in sys.path:
+            sys.path.insert(0, rag_path)
         
-        # Query knowledge base
-        kb_input = {
-            "input": {
-                'text': user_input
-            },
-            "retrieveAndGenerateConfiguration": {
-                'knowledgeBaseConfiguration': {
-                    'knowledgeBaseId': kb_id,
-                    'modelArn': model_arn,
-                    "retrievalConfiguration": {
-                        "vectorSearchConfiguration": {
-                            "filter": {
-                                "equals": {
-                                    "key": "CallId",
-                                    "value": call_id
-                                }
-                            }
-                        }
-                    }
-                },
-                'type': 'KNOWLEDGE_BASE'
+        from gemini_embeddings import GeminiEmbeddingService
+        
+        # Generate query embedding
+        embedding_service = GeminiEmbeddingService()
+        query_embedding = embedding_service.generate_query_embedding(user_input)
+        
+        if not query_embedding or len(query_embedding) == 0:
+            logger.warning("Failed to generate query embedding")
+            return ""
+        
+        # Search knowledge base using hybrid search
+        response = supabase.rpc(
+            'hybrid_search_knowledge',
+            {
+                'query_text': user_input,
+                'query_embedding': query_embedding,
+                'user_email': owner_email,
+                'match_count': 5,
+                'vector_weight': 0.7
             }
-        }
+        ).execute()
         
-        logger.info(f"Querying KB with input: {kb_input}")
+        if not response.data:
+            logger.info("No knowledge base results found")
+            return ""
         
-        response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
+        # Format results as context
+        context_parts = []
+        for idx, result in enumerate(response.data[:3]):  # Top 3 results
+            content = result.get('content', '')
+            if content:
+                context_parts.append(f"[Document {idx + 1}]\n{content}")
         
-        # Extract response text
-        kb_response = response.get("output", {}).get("text", "")
+        kb_context = "\n\n".join(context_parts)
+        logger.info(f"RAG KB returned {len(response.data)} results")
         
-        logger.info(f"KB response: {kb_response}")
-        
-        return kb_response
+        return kb_context
         
     except Exception as e:
-        logger.error(f"Error querying knowledge base: {str(e)}")
+        logger.error(f"Error querying RAG knowledge base: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return ""
 
 def handler(event, context):
@@ -203,116 +215,212 @@ def handler(event, context):
                 })
             }
         
-        # Fetch meeting transcript from DynamoDB
+        # Get owner email from event
+        owner_email = event.get('Owner', 'unknown@example.com')
+        
+        # Fetch meeting transcript from DynamoDB or Supabase
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Query knowledge base if configured
-        kb_context = query_knowledge_base(user_input, call_id)
+        # Query RAG knowledge base (replaces AWS Bedrock KB)
+        kb_context = query_knowledge_base(user_input, call_id, owner_email)
         
-        # Initialize Strands Agent
+        # Use Gemini for chat instead of Bedrock/Strands
         try:
-            from strands import Agent
-            from strands.models import BedrockModel
+            import requests
             
-            # Get model configuration from environment variables
-            model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
-            
-            # Get message ID for streaming - use MessageId if provided, otherwise fall back to SegmentId
+            # Get message ID for streaming
             transcript_segment_args = event.get('transcript_segment_args', {})
             message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
             
             logger.info(f"Using MessageId for streaming: {message_id}")
             
-            # Configure Bedrock model with streaming if enabled
-            bedrock_model = BedrockModel(
-                model_id=model_id,
-                temperature=0.3,
-                streaming=ENABLE_STREAMING
-            )
+            # Get Gemini configuration
+            gemini_api_key = os.environ.get('GEMINI_API_KEY')
+            gemini_model = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-1.5-flash')
             
-            # Create agent with meeting assistant prompt
-            agent = Agent(
-                model=bedrock_model,
-                system_prompt=get_meeting_assistant_prompt()
-            )
+            if not gemini_api_key:
+                logger.error("GEMINI_API_KEY not configured")
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': 'Gemini API not configured'})
+                }
             
-            # Prepare context for the agent
-            context_message = f"""
-Meeting Transcript:
-{transcript if transcript else "No meeting transcript available yet."}
+            # Prepare prompt for Gemini
+            context_parts = []
+            
+            # Add live transcript
+            if transcript:
+                context_parts.append("# Current Meeting Transcript:")
+                context_parts.append(transcript)
+            
+            # Add RAG knowledge base context
+            if kb_context:
+                context_parts.append("\n# Knowledge Base Context:")
+                context_parts.append(kb_context)
+            
+            context_text = "\n".join(context_parts) if context_parts else "No context available yet."
+            
+            prompt = f"""Context:
+{context_text}
 
-{f"Knowledge Base Context:\n{kb_context}\n" if kb_context else ""}
-User Request: {user_input}
-"""
+User Question: {user_input}
+
+Please provide a helpful response based on the context above. If the answer is in the meeting transcript, prioritize that. If not, use the knowledge base documents. Be concise and professional."""
+            
+            system_instruction = get_meeting_assistant_prompt()
             
             # Handle streaming vs non-streaming
             if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
-                logger.info("Streaming mode enabled - sending tokens to AppSync")
+                logger.info("Streaming mode enabled with Gemini - sending tokens to AppSync")
                 
-                # Import asyncio for async streaming
-                import asyncio
+                sequence = 0
+                full_response = []
                 
-                async def stream_response():
-                    sequence = 0
-                    full_response = []
-                    
-                    # Use stream_async to get async iterator
-                    async for event in agent.stream_async(context_message):
-                        # Check if this is a data event with text content
-                        if isinstance(event, dict) and 'data' in event:
-                            token_text = event['data']
-                            full_response.append(token_text)
-                            
-                            # Send token to AppSync
-                            send_chat_token_to_appsync(
-                                call_id=call_id,
-                                message_id=message_id,
-                                token=token_text,
-                                is_complete=False,
-                                sequence=sequence
-                            )
-                            sequence += 1
-                    
-                    # Send completion token
-                    send_chat_token_to_appsync(
-                        call_id=call_id,
-                        message_id=message_id,
-                        token='',
-                        is_complete=True,
-                        sequence=sequence
-                    )
-                    
-                    logger.info(f"Streaming complete. Total tokens: {sequence}")
-                    return ''.join(full_response)
+                # Stream from Gemini API
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:streamGenerateContent"
+                params = {'key': gemini_api_key, 'alt': 'sse'}
                 
-                # Run the async streaming function
-                response_text = asyncio.run(stream_response())
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": prompt}]
+                    }],
+                    "systemInstruction": {
+                        "parts": [{"text": system_instruction}]
+                    },
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 1024,
+                        "topP": 0.95
+                    }
+                }
+                
+                try:
+                    response = requests.post(url, params=params, json=payload, stream=True, timeout=60)
+                    
+                    if response.status_code == 200:
+                        # Parse SSE stream
+                        for line in response.iter_lines():
+                            if line:
+                                line_str = line.decode('utf-8')
+                                
+                                if line_str.startswith('data: '):
+                                    data_json = line_str[6:]
+                                    
+                                    try:
+                                        data = json.loads(data_json)
+                                        
+                                        # Extract text from response
+                                        if 'candidates' in data:
+                                            for candidate in data['candidates']:
+                                                if 'content' in candidate:
+                                                    for part in candidate['content'].get('parts', []):
+                                                        if 'text' in part:
+                                                            token_text = part['text']
+                                                            full_response.append(token_text)
+                                                            
+                                                            # Send token to AppSync
+                                                            send_chat_token_to_appsync(
+                                                                call_id=call_id,
+                                                                message_id=message_id,
+                                                                token=token_text,
+                                                                is_complete=False,
+                                                                sequence=sequence
+                                                            )
+                                                            sequence += 1
+                                    
+                                    except json.JSONDecodeError:
+                                        continue
+                        
+                        # Send completion token
+                        send_chat_token_to_appsync(
+                            call_id=call_id,
+                            message_id=message_id,
+                            token='',
+                            is_complete=True,
+                            sequence=sequence
+                        )
+                        
+                        response_text = ''.join(full_response)
+                        logger.info(f"Gemini streaming complete. Total tokens: {sequence}")
+                    
+                    else:
+                        logger.error(f"Gemini API error: {response.status_code}")
+                        response_text = f"Error: Gemini API returned {response.status_code}"
+                
+                except Exception as stream_error:
+                    logger.error(f"Gemini streaming error: {str(stream_error)}")
+                    response_text = f"Streaming error: {str(stream_error)}"
                 
             else:
-                # Non-streaming mode (current behavior)
-                response = agent(context_message)
+                # Non-streaming mode with Gemini
+                logger.info("Non-streaming mode with Gemini")
                 
-                # Convert AgentResult to string if needed
-                if hasattr(response, 'text'):
-                    response_text = response.text
-                elif hasattr(response, '__str__'):
-                    response_text = str(response)
-                else:
-                    response_text = response
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent"
+                params = {'key': gemini_api_key}
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": prompt}]
+                    }],
+                    "systemInstruction": {
+                        "parts": [{"text": system_instruction}]
+                    },
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 1024,
+                        "topP": 0.95
+                    }
+                }
+                
+                try:
+                    response = requests.post(url, params=params, json=payload, timeout=30)
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        
+                        # Extract text
+                        if 'candidates' in result and len(result['candidates']) > 0:
+                            candidate = result['candidates'][0]
+                            if 'content' in candidate:
+                                parts = candidate['content'].get('parts', [])
+                                if parts and 'text' in parts[0]:
+                                    response_text = parts[0]['text']
+                                else:
+                                    response_text = "No response generated"
+                            else:
+                                response_text = "No response generated"
+                        else:
+                            response_text = "No response generated"
+                    else:
+                        logger.error(f"Gemini API error: {response.status_code}")
+                        response_text = f"Error: Gemini API returned {response.status_code}"
+                
+                except Exception as gen_error:
+                    logger.error(f"Gemini generation error: {str(gen_error)}")
+                    response_text = f"Error: {str(gen_error)}"
             
-            logger.info(f"Strands agent response: {response_text}")
+            logger.info(f"Gemini response generated: {len(response_text)} characters")
             
             # Format response for LMA
             return {
                 'message': response_text,
                 'callId': call_id,
-                'source': 'strands_bedrock'
+                'source': 'gemini_rag',
+                'context_used': {
+                    'has_transcript': bool(transcript),
+                    'has_kb_context': bool(kb_context)
+                }
             }
             
         except ImportError as e:
-            logger.error(f"Strands SDK not available: {e}")
-            # Fallback to direct Bedrock call if Strands is not available
-            return fallback_bedrock_response(transcript, user_input, call_id)
+            logger.error(f"Required module not available: {e}")
+            return {
+                'statusCode': 500,
+                'body': json.dumps({
+                    'error': f'Import error: {str(e)}',
+                    'callId': call_id
+                })
+            }
             
     except Exception as e:
         logger.error(f"Error in Strands meeting assist: {str(e)}")
@@ -342,57 +450,5 @@ When responding:
 - Ask clarifying questions if the request is ambiguous
 - Maintain a helpful and professional tone"""
 
-def fallback_bedrock_response(transcript: str, user_input: str, call_id: str) -> Dict[str, Any]:
-    """
-    Fallback function that uses direct Bedrock API calls if Strands is not available
-    """
-    try:
-        bedrock_client = boto3.client('bedrock-runtime')
-        model_id = os.environ.get('MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
-        
-        # Prepare the prompt
-        prompt = f"""You are an AI assistant helping during a meeting.
-
-Meeting Context:
-{transcript if transcript else "No meeting transcript available yet."}
-
-User Request: {user_input}
-
-Please provide a helpful response based on the meeting context. Keep it concise and professional."""
-
-        # Prepare the message for Bedrock
-        message = {
-            "role": "user",
-            "content": [{"text": prompt}]
-        }
-        
-        # Call Bedrock
-        response = bedrock_client.converse(
-            modelId=model_id,
-            messages=[message],
-            inferenceConfig={
-                'temperature': 0.3,
-                'maxTokens': 500
-            }
-        )
-        
-        # Extract response text
-        response_text = response['output']['message']['content'][0]['text']
-        
-        logger.info(f"Fallback Bedrock response: {response_text}")
-        
-        return {
-            'message': response_text,
-            'callId': call_id,
-            'source': 'bedrock_fallback'
-        }
-        
-    except Exception as e:
-        logger.error(f"Fallback Bedrock call failed: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'error': f'Fallback error: {str(e)}',
-                'callId': call_id
-            })
-        }
+# Removed fallback_bedrock_response - No longer using AWS Bedrock
+# All chat functionality now uses Gemini + Supabase RAG

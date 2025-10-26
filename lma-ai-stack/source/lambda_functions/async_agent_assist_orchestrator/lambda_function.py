@@ -270,9 +270,13 @@ def publish_lambda_agent_assist_transcript_segment(
     if message_id:
         transcript_segment_args["MessageId"] = message_id
     
+    # Extract owner email from message
+    owner_email = message.get("Owner")
+    
     lambda_agent_assist_input = dict(
         content=transcript,
         transcript_segment_args=transcript_segment_args,
+        owner_email=owner_email,
     )
 
     transcript_segment = get_lambda_agent_assist_transcript(
@@ -288,6 +292,7 @@ def publish_lambda_agent_assist_transcript_segment(
 def get_lambda_agent_assist_transcript(
     transcript_segment_args: Dict[str, Any],
     content: str,
+    owner_email: Optional[str] = None,
 ):
     """Sends Lambda Agent Assist Requests"""
     call_id = transcript_segment_args["CallId"]
@@ -298,6 +303,7 @@ def get_lambda_agent_assist_transcript(
         'transcript_segment_args': transcript_segment_args,
         'dynamodb_table_name': DYNAMODB_TABLE_NAME,
         'dynamodb_pk': f"c#{call_id}",
+        'Owner': owner_email or 'unknown@example.com',  # Pass owner for RAG filtering
     }
 
     LOGGER.info("Agent Assist Lambda Request: %s", content)

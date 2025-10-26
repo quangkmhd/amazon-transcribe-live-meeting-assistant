@@ -5,6 +5,7 @@
  */
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getPipelineLogger } from './utils/pipeline-debug-logger';
+import { indexTranscriptSegment } from './transcript-indexer';
 
 const SUPABASE_URL = process.env['SUPABASE_URL']!;
 const SUPABASE_SERVICE_KEY = process.env['SUPABASE_SERVICE_KEY']!;
@@ -54,6 +55,21 @@ export async function insertTranscriptEvent(data: {
     
     // Log DB insert success
     logger.logDBInsertSuccess(data.meeting_id, duration);
+    
+    // ✅ Index final transcript segments for RAG search (asynchronous, don't wait)
+    if (data.is_final) {
+        indexTranscriptSegment({
+            meeting_id: data.meeting_id,
+            speaker: data.speaker_name || data.speaker_number,
+            content: data.transcript,
+            start_time: data.start_time,
+            end_time: data.end_time,
+            is_final: data.is_final,
+            owner_email: process.env['DEFAULT_OWNER_EMAIL'] || 'unknown@example.com'
+        }).catch(err => {
+            console.error('[Transcript Indexer] Error indexing segment (non-blocking):', err);
+        });
+    }
 }
 
 // Upsert meeting record

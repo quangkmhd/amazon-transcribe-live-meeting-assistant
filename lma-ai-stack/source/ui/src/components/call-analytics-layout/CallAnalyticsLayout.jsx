@@ -78,12 +78,7 @@ const CallAnalyticsLayout = () => {
   } = useCallsSupabaseApi({ initialPeriodsToLoad });
 
   // eslint-disable-next-line prettier/prettier
-  const {
-    splitPanelOpen,
-    onSplitPanelToggle,
-    splitPanelSize,
-    onSplitPanelResize,
-  } = useSplitPanel(selectedItems);
+  const { splitPanelOpen, onSplitPanelToggle, splitPanelSize, onSplitPanelResize } = useSplitPanel(selectedItems);
 
   // eslint-disable-next-line react/jsx-no-constructed-context-values
   const callsContextValue = {

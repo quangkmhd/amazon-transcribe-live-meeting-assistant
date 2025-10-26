@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 
-import supabase from '../utils/supabase-client';
+import { supabase } from '../utils/supabase-client';
 import useAppContext from '../contexts/app';
 
 import { CALL_LIST_SHARDS_PER_DAY } from '../components/call-list/calls-table-config';

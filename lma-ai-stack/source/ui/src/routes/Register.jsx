@@ -5,7 +5,7 @@
  */
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import supabase from '../utils/supabase-client';
+import { supabase } from '../utils/supabase-client';
 import { LOGIN_PATH } from './constants';
 import './Auth.css';
 

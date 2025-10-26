@@ -27,6 +27,7 @@ import { API, Logger, graphqlOperation } from 'aws-amplify';
 // Translation temporarily disabled in Soniox pattern
 // import { GeminiTranslateClient, TranslateTextCommand } from '../../utils/gemini-translate';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
+import DocumentPanel from './DocumentPanel';
 
 import RecordingPlayer from '../recording-player';
 import useSettingsContext from '../../contexts/settings';
@@ -998,6 +999,7 @@ const CallTranscriptContainer = ({
         })}
       </Container>
       {getAgentAssistPanel(item, collapseSentiment)}
+      <DocumentPanel />
     </Grid>
   );
 };

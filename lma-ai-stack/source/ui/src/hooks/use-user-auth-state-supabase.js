@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { useState, useEffect } from 'react';
-import supabase from '../utils/supabase-client';
+import { supabase } from '../utils/supabase-client';
 
 const logger = {
   debug: (...args) => console.log('[useUserAuthStateSupabase]', ...args),

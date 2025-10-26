@@ -6,12 +6,24 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
-import { Box, Button, Spinner, Header, Grid, Container, SpaceBetween, Input, Link } from '@awsui/components-react';
+import {
+  Box,
+  Button,
+  Spinner,
+  Header,
+  Grid,
+  Container,
+  SpaceBetween,
+  Input,
+  Link,
+  Tabs,
+} from '@awsui/components-react';
 import PropTypes from 'prop-types';
 import { API, Logger } from 'aws-amplify';
 import queryKnowledgeBase from '../../graphql/queries/queryKnowledgeBase';
 import { CALLS_PATH } from '../../routes/constants';
 import useSettingsContext from '../../contexts/settings';
+import DocumentUpload from './DocumentUpload';
 
 const logger = new Logger('queryKnowledgeBase');
 
@@ -56,6 +68,7 @@ export const MeetingsQueryLayout = () => {
   const [meetingKbQueries, setMeetingKbQueries] = useState([]);
   const [meetingKbQueryStatus, setMeetingKbQueryStatus] = useState(false);
   const [kbSessionId, setKbSessionId] = useState('');
+  const [activeTabId, setActiveTabId] = useState('query');
   const { settings } = useSettingsContext();
 
   const getElementByIdAsync = (id) =>
@@ -144,11 +157,11 @@ export const MeetingsQueryLayout = () => {
     settings.ShouldUseTranscriptKnowledgeBase === 'true'
       ? 'Ask a question below.'
       : 'Meeting queries are not enabled. Transcript Knowledge Base is set to DISABLED for this LMA deployment.';
-  return (
+
+  const queryTab = (
     <Container
       fitHeight={false}
-      header={<Header variant="h2">Meetings Knowledge Base Query Tool</Header>}
-      /* For future use. :) */
+      header={<Header variant="h2">Query Knowledge Base</Header>}
       footer={
         <form onSubmit={onSubmit}>
           <Grid gridDefinition={[{ colspan: { default: 12, xxs: 9 } }, { default: 12, xxs: 3 }]}>
@@ -200,6 +213,25 @@ export const MeetingsQueryLayout = () => {
         </SpaceBetween>
       </div>
     </Container>
+  );
+
+  return (
+    <Tabs
+      activeTabId={activeTabId}
+      onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+      tabs={[
+        {
+          id: 'query',
+          label: 'Query Knowledge Base',
+          content: queryTab,
+        },
+        {
+          id: 'documents',
+          label: 'Manage Documents',
+          content: <DocumentUpload />,
+        },
+      ]}
+    />
   );
 };
 

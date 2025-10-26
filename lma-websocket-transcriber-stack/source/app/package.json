@@ -25,6 +25,7 @@
     "@fastify/websocket": "^5.0.0",
     "@supabase/supabase-js": "^2.76.1",
     "aws-jwt-verify": "^4.0.0",
+    "axios": "^1.12.2",
     "block-stream2": "^2.1.0",
     "buffer-from": "^1.1.2",
     "dotenv": "^16.0.0",

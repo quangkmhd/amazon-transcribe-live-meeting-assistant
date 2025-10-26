@@ -3,6 +3,9 @@ import supabaseConfig from '../supabase-config';
 
 const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
 
+// Export supabase instance for use in other modules (named export for rag-client)
+export { supabase };
+
 export const setSpeakerName = async (meetingId, speakerNumber, speakerName, speakerEmail = null) => {
   const { data, error } = await supabase.from('speaker_identity').upsert(
     {
@@ -80,16 +83,18 @@ export const shareMeetings = async (calls, meetingRecipients) => {
       throw new Error('User not authenticated');
     }
 
+    // Convert comma-separated string to array
+    const recipientsArray = meetingRecipients.split(',').map((email) => email.trim());
+
     // Update each call's shared_with field
     const updatePromises = calls.map(async (call) => {
       const { data, error } = await supabase
-        .from('call_list')
+        .from('meetings')
         .update({
-          shared_with: meetingRecipients,
+          shared_with: recipientsArray,
           updated_at: new Date().toISOString(),
         })
-        .eq('pk', call.ListPK)
-        .eq('sk', call.ListSK)
+        .eq('meeting_id', call.CallId)
         .select();
 
       if (error) {
@@ -130,31 +135,48 @@ export const deleteMeetings = async (calls) => {
     const deletePromises = calls.map(async (call) => {
       const callId = call.CallId;
 
-      // Delete in order: transcripts, then call_list entry
+      // Delete in order: transcripts, speaker identities, then meeting entry
       // 1. Delete all transcript segments for this call
-      const { error: transcriptError } = await supabase.from('transcript_segments').delete().eq('call_id', callId);
+      const { error: transcriptError } = await supabase.from('transcripts').delete().eq('meeting_id', callId);
 
       if (transcriptError) {
         console.error(`Failed to delete transcripts for ${callId}:`, transcriptError);
       }
 
-      // 2. Delete speaker identities
+      // 2. Delete transcript events
+      const { error: eventError } = await supabase.from('transcript_events').delete().eq('meeting_id', callId);
+
+      if (eventError) {
+        console.error(`Failed to delete transcript events for ${callId}:`, eventError);
+      }
+
+      // 3. Delete speaker identities
       const { error: speakerError } = await supabase.from('speaker_identity').delete().eq('meeting_id', callId);
 
       if (speakerError) {
         console.error(`Failed to delete speaker identities for ${callId}:`, speakerError);
       }
 
-      // 3. Delete call list entry
-      const { error: callError } = await supabase
-        .from('call_list')
-        .delete()
-        .eq('pk', call.ListPK)
-        .eq('sk', call.ListSK);
+      // 4. Delete virtual participants associated with this call
+      const { error: vpError } = await supabase.from('virtual_participants').delete().eq('call_id', callId);
 
-      if (callError) {
-        console.error(`Failed to delete call ${callId}:`, callError);
-        throw new Error(`Failed to delete call ${callId}: ${callError.message}`);
+      if (vpError) {
+        console.error(`Failed to delete virtual participants for ${callId}:`, vpError);
+      }
+
+      // 5. Delete pipeline logs
+      const { error: logError } = await supabase.from('pipeline_logs').delete().eq('call_id', callId);
+
+      if (logError) {
+        console.error(`Failed to delete pipeline logs for ${callId}:`, logError);
+      }
+
+      // 6. Delete meeting entry (main record)
+      const { error: meetingError } = await supabase.from('meetings').delete().eq('meeting_id', callId);
+
+      if (meetingError) {
+        console.error(`Failed to delete meeting ${callId}:`, meetingError);
+        throw new Error(`Failed to delete meeting ${callId}: ${meetingError.message}`);
       }
 
       return callId;
