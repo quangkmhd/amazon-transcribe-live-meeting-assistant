@@ -2,7 +2,7 @@
  * Copyright (c) 2025
  * This file is licensed under the MIT License.
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import PropTypes from 'prop-types';
 import {
   Box,
@@ -52,6 +52,7 @@ const DocumentUpload = () => {
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const fileInputRef = useRef(null);
 
   const loadDocuments = async () => {
     try {
@@ -123,6 +124,12 @@ const DocumentUpload = () => {
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       handleFiles(e.target.files);
+    }
+  };
+
+  const handleClickUploadArea = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
     }
   };
 
@@ -274,6 +281,15 @@ const DocumentUpload = () => {
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
+            onClick={handleClickUploadArea}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleClickUploadArea();
+              }
+            }}
             style={{
               border: dragActive ? '2px dashed #0972d3' : '2px dashed #d1d5db',
               borderRadius: '8px',
@@ -288,20 +304,15 @@ const DocumentUpload = () => {
             <Box variant="h3" padding={{ top: 's' }}>
               Drag and drop files here
             </Box>
-            <Box variant="p" color="text-body-secondary" padding={{ top: 'xs', bottom: 's' }}>
-              or
-            </Box>
-            <label htmlFor="file-upload">
-              <Button>Browse Files</Button>
-              <input
-                id="file-upload"
-                type="file"
-                multiple
-                accept=".pdf,.docx,.pptx,.xlsx,.txt,.md"
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-              />
-            </label>
+            <input
+              id="file-upload"
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.docx,.pptx,.xlsx,.txt,.md"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
             <Box variant="small" color="text-body-secondary" padding={{ top: 's' }}>
               Supported: PDF, DOCX, PPTX, XLSX, TXT, MD (max 50MB each)
             </Box>

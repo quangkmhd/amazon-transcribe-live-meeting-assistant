@@ -11,11 +11,42 @@ from typing import TYPE_CHECKING, Dict, List
 import json
 import re
 
-# third-party imports from Lambda layer
-from aws_lambda_powertools import Logger
-from aws_lambda_powertools.utilities.typing import LambdaContext
-import boto3
-from botocore.config import Config as BotoCoreConfig
+# third-party imports from Lambda layer - conditional for non-AWS environments
+try:
+    from aws_lambda_powertools import Logger  # type: ignore
+    from aws_lambda_powertools.utilities.typing import LambdaContext  # type: ignore
+except ImportError:
+    import logging
+    class Logger:
+        def __init__(self, location: str = ""):
+            self._l = logging.getLogger(__name__)
+            if not self._l.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+                handler.setFormatter(formatter)
+                self._l.addHandler(handler)
+            self._l.setLevel(logging.INFO)
+        def info(self, msg, *args, **kwargs):
+            self._l.info(msg)
+        def debug(self, msg, *args, **kwargs):
+            self._l.debug(msg)
+        def error(self, msg, *args, **kwargs):
+            self._l.error(msg)
+        def exception(self, msg, *args, **kwargs):
+            self._l.exception(msg)
+        def inject_lambda_context(self, func):
+            return func
+    class LambdaContext:  # type: ignore
+        pass
+
+try:
+    import boto3  # type: ignore
+    from botocore.config import Config as BotoCoreConfig  # type: ignore
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None  # type: ignore
+    BotoCoreConfig = None  # type: ignore
+    _BOTO3_AVAILABLE = False
 
 # imports from Lambda layer
 # pylint: disable=import-error
@@ -45,22 +76,43 @@ else:
     SNSClient = object
     SSMClient = object
 
-APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
-APPSYNC_CLIENT = AppsyncAioGqlClient(
-    url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
+APPSYNC_GRAPHQL_URL = environ.get("APPSYNC_GRAPHQL_URL", "")
+if APPSYNC_GRAPHQL_URL:
+    APPSYNC_CLIENT = AppsyncAioGqlClient(
+        url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
+else:
+    APPSYNC_CLIENT = None  # type: ignore
 
-BOTO3_SESSION: Boto3Session = boto3.Session()
-CLIENT_CONFIG = BotoCoreConfig(
-    retries={"mode": "adaptive", "max_attempts": 3},
-)
+if _BOTO3_AVAILABLE:
+    try:
+        BOTO3_SESSION: Boto3Session = boto3.Session()  # type: ignore
+        CLIENT_CONFIG = BotoCoreConfig(  # type: ignore
+            retries={"mode": "adaptive", "max_attempts": 3},
+        )
 
-STATE_DYNAMODB_TABLE_NAME = environ["STATE_DYNAMODB_TABLE_NAME"]
-STATE_DYNAMODB_RESOURCE: DynamoDBServiceResource = BOTO3_SESSION.resource(
-    "dynamodb",
-    config=CLIENT_CONFIG,
-)
-STATE_DYNAMODB_TABLE: DynamoDbTable = STATE_DYNAMODB_RESOURCE.Table(
-    STATE_DYNAMODB_TABLE_NAME)
+        STATE_DYNAMODB_TABLE_NAME = environ.get("STATE_DYNAMODB_TABLE_NAME", "")
+        if STATE_DYNAMODB_TABLE_NAME:
+            STATE_DYNAMODB_RESOURCE: DynamoDBServiceResource = BOTO3_SESSION.resource(  # type: ignore
+                "dynamodb",
+                config=CLIENT_CONFIG,
+            )
+            STATE_DYNAMODB_TABLE: DynamoDbTable = STATE_DYNAMODB_RESOURCE.Table(  # type: ignore
+                STATE_DYNAMODB_TABLE_NAME)
+        else:
+            STATE_DYNAMODB_RESOURCE = None  # type: ignore
+            STATE_DYNAMODB_TABLE = None  # type: ignore
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"AWS services not available: {e}")
+        BOTO3_SESSION = None  # type: ignore
+        CLIENT_CONFIG = None  # type: ignore
+        STATE_DYNAMODB_RESOURCE = None  # type: ignore
+        STATE_DYNAMODB_TABLE = None  # type: ignore
+else:
+    BOTO3_SESSION = None  # type: ignore
+    CLIENT_CONFIG = None  # type: ignore
+    STATE_DYNAMODB_RESOURCE = None  # type: ignore
+    STATE_DYNAMODB_TABLE = None  # type: ignore
 
 IS_LEX_AGENT_ASSIST_ENABLED = getenv(
     "IS_LEX_AGENT_ASSIST_ENABLED", "true").lower() == "true"
@@ -70,23 +122,54 @@ IS_LAMBDA_AGENT_ASSIST_ENABLED = getenv(
 
 IS_SENTIMENT_ANALYSIS_ENABLED = getenv(
     "IS_SENTIMENT_ANALYSIS_ENABLED", "true").lower() == "true"
-if IS_SENTIMENT_ANALYSIS_ENABLED:
-    COMPREHEND_CLIENT: ComprehendClient = BOTO3_SESSION.client(
-        "comprehend", config=CLIENT_CONFIG)
-else:
-    COMPREHEND_CLIENT = None
-COMPREHEND_LANGUAGE_CODE = getenv("COMPREHEND_LANGUAGE_CODE", "en")
 
-SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
-SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
+if _BOTO3_AVAILABLE and BOTO3_SESSION:
+    try:
+        if IS_SENTIMENT_ANALYSIS_ENABLED:
+            COMPREHEND_CLIENT: ComprehendClient = BOTO3_SESSION.client(  # type: ignore
+                "comprehend", config=CLIENT_CONFIG)
+        else:
+            COMPREHEND_CLIENT = None  # type: ignore
+        
+        SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)  # type: ignore
+        SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)  # type: ignore
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"AWS clients creation failed: {e}")
+        COMPREHEND_CLIENT = None  # type: ignore
+        SNS_CLIENT = None  # type: ignore
+        SSM_CLIENT = None  # type: ignore
+else:
+    COMPREHEND_CLIENT = None  # type: ignore
+    SNS_CLIENT = None  # type: ignore
+    SSM_CLIENT = None  # type: ignore
+
+COMPREHEND_LANGUAGE_CODE = getenv("COMPREHEND_LANGUAGE_CODE", "en")
 
 LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_LOOP = asyncio.get_event_loop()
 
-setting_response = SSM_CLIENT.get_parameter(
-    Name=getenv("PARAMETER_STORE_NAME"))
-SETTINGS = json.loads(setting_response["Parameter"]["Value"])
+# Load settings from SSM (if available) or use defaults
+if SSM_CLIENT:
+    try:
+        setting_response = SSM_CLIENT.get_parameter(  # type: ignore
+            Name=getenv("PARAMETER_STORE_NAME", ""))
+        SETTINGS = json.loads(setting_response["Parameter"]["Value"])
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"SSM parameter load failed: {e}, using defaults")
+        SETTINGS = {
+            "CategoryAlertRegex": ".*",  # Match all categories
+            "AssistantWakePhraseRegEx": "(?i)(hey|ok)\\s+(assistant|alexa)"  # Default wake phrase
+        }
+else:
+    # Default settings for non-AWS environments
+    SETTINGS = {
+        "CategoryAlertRegex": ".*",
+        "AssistantWakePhraseRegEx": "(?i)(hey|ok)\\s+(assistant|alexa)"
+    }
+
 if "CategoryAlertRegex" in SETTINGS:
     SETTINGS['AlertRegEx'] = re.compile(SETTINGS["CategoryAlertRegex"])
 if "AssistantWakePhraseRegEx" in SETTINGS:

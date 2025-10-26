@@ -14,9 +14,33 @@ import json
 import re
 
 # third-party imports from Lambda layer
-import boto3
-from botocore.config import Config as BotoCoreConfig
-from aws_lambda_powertools import Logger
+try:
+    import boto3  # type: ignore
+    from botocore.config import Config as BotoCoreConfig  # type: ignore
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None  # type: ignore
+    BotoCoreConfig = None  # type: ignore
+    _BOTO3_AVAILABLE = False
+
+try:
+    from aws_lambda_powertools import Logger  # type: ignore
+except ImportError:
+    import logging
+    class Logger:
+        def __init__(self, location: str = ""):
+            self._l = logging.getLogger(__name__)
+        def info(self, msg, *args, **kwargs):
+            self._l.info(msg)
+        def debug(self, msg, *args, **kwargs):
+            self._l.debug(msg)
+        def warning(self, msg, *args, **kwargs):
+            self._l.warning(msg)
+        def error(self, msg, *args, **kwargs):
+            self._l.error(msg)
+        def exception(self, msg):
+            self._l.exception(msg)
+
 from gql.client import AsyncClientSession as AppsyncAsyncClientSession
 from gql.dsl import DSLMutation, DSLSchema, DSLQuery, dsl_gql
 from graphql.language.printer import print_ast
@@ -30,7 +54,7 @@ from graphql_helpers import (
     transcript_segment_sentiment_fields,
 )
 from sns_utils import publish_sns
-from lambda_utils import invoke_lambda
+# from lambda_utils import invoke_lambda  # Not currently used - kept for future lambda hooks
 from eventprocessor_utils import (
     normalize_transcript_segments,
     get_meeting_ttl,
@@ -39,6 +63,18 @@ from eventprocessor_utils import (
     transform_segment_to_categories_agent_assist,
     get_owner_from_jwt,
 )
+
+# Try to import Supabase utilities (AWS-free alternative)
+try:
+    from supabase_utils import (
+        transcript_operations as supabase_transcript,
+        meeting_operations as supabase_meeting,
+    )
+    _SUPABASE_AVAILABLE = True
+except ImportError:
+    supabase_transcript = None
+    supabase_meeting = None
+    _SUPABASE_AVAILABLE = False
 # pylint: enable=import-error
 if TYPE_CHECKING:
     from mypy_boto3_lambda.client import LambdaClient
@@ -57,10 +93,21 @@ SNS_TOPIC_ARN = getenv("SNS_TOPIC_ARN", "")
 
 IS_SENTIMENT_ANALYSIS_ENABLED = getenv("IS_SENTIMENT_ANALYSIS_ENABLED", "true").lower() == "true"
 
-BOTO3_SESSION: Boto3Session = boto3.Session()
-CLIENT_CONFIG = BotoCoreConfig(
-    retries={"mode": "adaptive", "max_attempts": 3},
-)
+if _BOTO3_AVAILABLE and boto3:
+    try:
+        BOTO3_SESSION: Boto3Session = boto3.Session()  # type: ignore
+        CLIENT_CONFIG = BotoCoreConfig(  # type: ignore
+            retries={"mode": "adaptive", "max_attempts": 3},
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"boto3 session creation failed: {e}")
+        BOTO3_SESSION = None  # type: ignore
+        CLIENT_CONFIG = None  # type: ignore
+else:
+    BOTO3_SESSION = None  # type: ignore
+    CLIENT_CONFIG = None  # type: ignore
+
 TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN = getenv("TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN", "")
 
 START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN = getenv("START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "")
@@ -73,12 +120,23 @@ ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_AR
 
 TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY = getenv(
     "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY", "true").lower() == "true"
+
 if (TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
         or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
         or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
         or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
         or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN):
-    LAMBDA_HOOK_CLIENT: LambdaClient = BOTO3_SESSION.client("lambda", config=CLIENT_CONFIG)
+    if BOTO3_SESSION and CLIENT_CONFIG:
+        try:
+            LAMBDA_HOOK_CLIENT: LambdaClient = BOTO3_SESSION.client("lambda", config=CLIENT_CONFIG)  # type: ignore
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Lambda client creation failed: {e}")
+            LAMBDA_HOOK_CLIENT = None  # type: ignore
+    else:
+        LAMBDA_HOOK_CLIENT = None  # type: ignore
+else:
+    LAMBDA_HOOK_CLIENT = None  # type: ignore
 
 IS_LEX_AGENT_ASSIST_ENABLED = False
 
@@ -161,7 +219,32 @@ def add_transcript_segments(
     people_can_access: List[str],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
-    """Add Transcript Segment GraphQL Mutation"""
+    """
+    Add Transcript Segment GraphQL Mutation
+    With Supabase fallback for AWS-free operation
+    """
+    # Try Supabase first (AWS-free)
+    if _SUPABASE_AVAILABLE and supabase_transcript:
+        try:
+            supabase_transcript.add_transcript_segment(
+                call_id=message.get("CallId", ""),
+                channel=message.get("Channel", "CALLER"),
+                transcript=message.get("Transcript", ""),
+                start_time=message.get("StartTime", 0),
+                end_time=message.get("EndTime", 0),
+                is_partial=message.get("IsPartial", False),
+                speaker=message.get("Speaker", ""),
+                segment_id=message.get("SegmentId"),
+                sentiment=message.get("Sentiment"),
+                sentiment_score=message.get("SentimentScore"),
+                sentiment_weighted=message.get("SentimentWeighted"),
+                owner=message.get("Owner"),
+            )
+            LOGGER.info("✅ Transcript segment added to Supabase")
+        except Exception as e:
+            LOGGER.warning(f"Supabase transcript add failed: {e}, using AppSync")
+    
+    # AppSync GraphQL mutation (original path)
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -1129,11 +1212,16 @@ def get_caller_and_system_phone_numbers_from_connect(
     instanceId = message.get("InstanceId")
     contactId = message.get("ContactId")
 
-    client = boto3.client('connect')
-    response = client.get_contact_attributes(
-        InstanceId=instanceId,
-        InitialContactId=contactId
-    )
+    try:
+        client = boto3.client('connect')  # type: ignore
+        response = client.get_contact_attributes(
+            InstanceId=instanceId,
+            InitialContactId=contactId
+        )
+    except Exception as e:
+        LOGGER.warning(f"AWS Connect not available: {e}, using defaults")
+        # Return defaults when Connect API unavailable
+        return (DEFAULT_CUSTOMER_PHONE_NUMBER, DEFAULT_SYSTEM_PHONE_NUMBER)
     # Try to retrieve customer phone number from contact attribute
     customer_phone_number = response["Attributes"].get(CONNECT_CONTACT_ATTR_CUSTOMER_PHONE_NUMBER)
     if not customer_phone_number:
@@ -1229,22 +1317,25 @@ def merge_dicts(d1, d2):
 ##########################################################################
 
 def send_call_session_mapping_event(call_id, session_id):
-    client = boto3.client('events')
-
-    LOGGER.debug("Sending CALL_SESSION_MAPPING event. callId: %s, SessionId: %s", call_id, session_id)
-    event_response = client.put_events(
-        Entries=[
-            {
-                'Source': "lca-solution",
-                'DetailType': "CALL_SESSION_MAPPING",
-                'Detail': json.dumps({
-                    'callId': call_id,
-                    'sessionId': session_id,
-                }),
-            }
-        ]
-    )
-    LOGGER.debug("Send CALL_SESSION_MAPPING Response: ", extra=event_response)
+    try:
+        client = boto3.client('events')  # type: ignore
+        
+        LOGGER.debug("Sending CALL_SESSION_MAPPING event. callId: %s, SessionId: %s", call_id, session_id)
+        event_response = client.put_events(
+            Entries=[
+                {
+                    'Source': "lca-solution",
+                    'DetailType': "CALL_SESSION_MAPPING",
+                    'Detail': json.dumps({
+                        'callId': call_id,
+                        'sessionId': session_id,
+                    }),
+                }
+            ]
+        )
+        LOGGER.debug("Send CALL_SESSION_MAPPING Response: ", extra=event_response)
+    except Exception as e:
+        LOGGER.warning(f"EventBridge not available, skipping CALL_SESSION_MAPPING: {e}")
 
 ##########################################################################
 # check for agent assist wake phrase

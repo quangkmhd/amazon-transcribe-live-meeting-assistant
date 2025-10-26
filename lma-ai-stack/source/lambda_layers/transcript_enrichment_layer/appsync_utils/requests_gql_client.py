@@ -7,7 +7,18 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from gql.client import Client
-from gql.transport.appsync_auth import AppSyncIAMAuthentication
+try:
+    from gql.transport.appsync_auth import AppSyncIAMAuthentication
+    _IAM_AUTH_AVAILABLE = True
+except ImportError:
+    # Fallback for non-AWS environments
+    _IAM_AUTH_AVAILABLE = False
+    class AppSyncIAMAuthentication:
+        """Minimal shim"""
+        def __init__(self, host: str):
+            self.host = host
+        def get_headers(self, data: str = ""):
+            return {}
 from gql.transport.requests import RequestsHTTPTransport
 from requests.auth import AuthBase
 

@@ -8,7 +8,17 @@ import asyncio
 from typing import TYPE_CHECKING
 
 # third-party imports from Lambda layer
-from aws_lambda_powertools import Logger
+try:
+    from aws_lambda_powertools import Logger  # type: ignore
+except ImportError:
+    import logging
+    class Logger:
+        def __init__(self, child: bool = False, location: str = ""):
+            self._l = logging.getLogger(__name__)
+        def warning(self, msg, *args, **kwargs):
+            self._l.warning(msg)
+        def exception(self, msg, *args, **kwargs):
+            self._l.exception(msg)
 
 
 LOGGER = Logger(

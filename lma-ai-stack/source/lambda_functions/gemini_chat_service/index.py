@@ -12,15 +12,8 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional, Generator
+import sys
 import requests
-
-# Supabase client
-try:
-    from supabase import create_client, Client
-except ImportError:
-    import subprocess
-    subprocess.check_call(['pip', 'install', 'supabase'])
-    from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,8 +31,58 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
 APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'true').lower() == 'true'
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+# Use centralized Supabase client (better connection pooling)
+try:
+    # Try to use shared client from layer first
+    import sys
+    import os
+    layer_path = os.path.join(os.path.dirname(__file__), '../../lambda_layers/transcript_enrichment_layer')
+    if layer_path not in sys.path:
+        sys.path.insert(0, layer_path)
+    
+    from supabase_utils.client import get_supabase_client
+    supabase = get_supabase_client()
+except ImportError:
+    # Fallback to direct import (backward compatible)
+    try:
+        from supabase import create_client, Client  # type: ignore
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)  # type: ignore
+    except ImportError:
+        supabase = None
+        logger.warning("Supabase not available")
+
+
+# ---- RAG structured logging setup ----
+# Ensure we can import common logging utilities regardless of invocation path
+try:
+    sys.path.append(os.path.join(os.path.dirname(__file__), "../../common"))
+    from rag_logging import (
+        init_rag_logging,
+        new_cid,
+        get_cid,
+        with_stage,
+        sha256_16,
+        log_info,
+    )
+except Exception:
+    # Fallback: continue without structured logging if import fails
+    init_rag_logging = None
+    new_cid = lambda: ""
+    get_cid = lambda: ""
+    def with_stage(_):
+        def deco(fn):
+            return fn
+        return deco
+    sha256_16 = lambda _x: ""
+    def log_info(_payload):
+        pass
+
+if callable(init_rag_logging):
+    init_rag_logging(
+        log_dir=os.getenv("LOG_DIR", "@log"),
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        service_name="gemini_chat_service",
+    )
 
 
 def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
@@ -92,6 +135,7 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
         logger.error(f"Error sending token to AppSync: {str(e)}")
 
 
+@with_stage("retriever_transcript")
 def get_live_transcript_context(call_id: str, last_n_segments: int = 20) -> str:
     """
     Fetch recent transcript segments from live meeting
@@ -134,6 +178,7 @@ def get_live_transcript_context(call_id: str, last_n_segments: int = 20) -> str:
         return ""
 
 
+@with_stage("context_assembler")
 def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) -> Dict[str, Any]:
     """
     Assemble unified context from live transcript + RAG knowledge base
@@ -184,6 +229,21 @@ def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) ->
         
         combined_context = "\n".join(context_parts)
         
+        # Structured log: context stats
+        try:
+            rag_docs = rag_result.get('sources', [])
+            log_info({
+                "stage": "context_assembler",
+                "event": "stats",
+                "query_hash": sha256_16(user_query),
+                "retrieved_docs_count": len(rag_docs),
+                "has_live_transcript": bool(live_transcript),
+                "has_rag_context": rag_result.get('has_context', False),
+                "context_tokens": len(combined_context.split()),
+            })
+        except Exception:
+            pass
+
         return {
             'context': combined_context,
             'live_transcript': live_transcript,
@@ -208,6 +268,7 @@ def assemble_meeting_context(user_query: str, call_id: str, owner_email: str) ->
         }
 
 
+@with_stage("generator_stream")
 def stream_gemini_response(prompt: str, system_instruction: str) -> Generator[str, None, None]:
     """
     Stream response from Gemini API
@@ -278,6 +339,7 @@ def stream_gemini_response(prompt: str, system_instruction: str) -> Generator[st
         yield f"Error: {str(e)}"
 
 
+@with_stage("generator")
 def generate_gemini_response_non_streaming(prompt: str, system_instruction: str) -> str:
     """
     Generate non-streaming response from Gemini API
@@ -335,6 +397,42 @@ def generate_gemini_response_non_streaming(prompt: str, system_instruction: str)
         return f"Error: {str(e)}"
 
 
+@with_stage("self_debug")
+def self_debug_analyze(query: str, context_result: Dict[str, Any], response_text: str) -> Dict[str, Any]:
+    """
+    Lightweight self-debug checks to emit actionable recommendations without external calls.
+    """
+    try:
+        retrieved_docs_count = len(context_result.get('sources', []) or [])
+        context_tokens = len((context_result.get('context') or "").split())
+        recs = []
+        stage_failures = []
+        need_reindex = False
+        need_query_rewrite = False
+
+        if retrieved_docs_count == 0:
+            recs.append("Retriever returned 0 results – consider reindexing vector store.")
+            stage_failures.append("retriever")
+            need_reindex = True
+        if context_tokens == 0:
+            recs.append("Empty context assembled – lower similarity threshold or increase top_k.")
+            stage_failures.append("context_assembler")
+        if response_text and response_text.startswith("Error:"):
+            stage_failures.append("generator")
+
+        payload = {
+            "recommendations": recs,
+            "stage_failures": stage_failures,
+            "need_reindex": need_reindex,
+            "need_query_rewrite": need_query_rewrite,
+        }
+        log_info({"stage": "self_debug", "event": "summary", **payload})
+        return payload
+    except Exception as e:
+        logger.error(f"self_debug error: {e}")
+        return {"error": str(e)}
+
+
 def get_meeting_assistant_prompt() -> str:
     """
     System prompt for meeting assistant
@@ -376,6 +474,18 @@ def lambda_handler(event, context):
     """
     try:
         logger.info(f"Gemini Chat Service - Processing event")
+        if callable(new_cid):
+            cid = new_cid()
+            try:
+                log_info({
+                    "stage": "query_intake",
+                    "event": "received",
+                    "cid": cid,
+                    "call_id": event.get('CallId', ''),
+                    "message_id": event.get('MessageId', ''),
+                })
+            except Exception:
+                pass
         
         # Extract parameters
         call_id = event.get('CallId', '')
@@ -393,6 +503,15 @@ def lambda_handler(event, context):
             }
         
         logger.info(f"Processing chat message for call {call_id}: {user_message[:100]}...")
+        try:
+            log_info({
+                "stage": "query_intake",
+                "event": "parsed",
+                "query_hash": sha256_16(user_message),
+                "owner_hash": sha256_16(owner_email),
+            })
+        except Exception:
+            pass
         
         # Assemble context from live transcript + RAG
         context_result = assemble_meeting_context(user_message, call_id, owner_email)
@@ -444,12 +563,28 @@ Please provide a helpful response based on the context above."""
             # Non-streaming mode
             logger.info("Non-streaming mode")
             response_text = generate_gemini_response_non_streaming(prompt, system_instruction)
+
+        try:
+            log_info({
+                "stage": "generator",
+                "event": "result",
+                "response_length": len(response_text or ""),
+                "response_tokens": len((response_text or "").split()),
+            })
+        except Exception:
+            pass
         
         # Log context sources for debugging
         logger.info(f"Response generated using:")
         logger.info(f"  - Live transcript: {context_result['has_live_transcript']}")
         logger.info(f"  - RAG context: {context_result['has_rag_context']}")
         logger.info(f"  - Sources: {len(context_result.get('sources', []))}")
+
+        # Self-debug summary
+        try:
+            _ = self_debug_analyze(user_message, context_result, response_text)
+        except Exception:
+            pass
         
         return {
             'message': response_text,

@@ -9,10 +9,28 @@ import traceback
 from typing import Any, Coroutine, Dict, List, Literal, Optional, Protocol, Tuple, Union
 
 # third-party imports from Lambda layer
-from aws_lambda_powertools import Logger
-from aws_lambda_powertools.utilities.data_classes import KinesisStreamEvent
-from aws_lambda_powertools.utilities.data_classes.kinesis_stream_event import KinesisStreamRecord
-from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType
+try:
+    from aws_lambda_powertools import Logger  # type: ignore
+    from aws_lambda_powertools.utilities.data_classes import KinesisStreamEvent  # type: ignore
+    from aws_lambda_powertools.utilities.data_classes.kinesis_stream_event import KinesisStreamRecord  # type: ignore
+    from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType  # type: ignore
+except ImportError:
+    import logging
+    class Logger:
+        def __init__(self, child: bool = False, location: str = ""):
+            self._l = logging.getLogger(__name__)
+        def debug(self, msg, *args, **kwargs):
+            self._l.debug(msg)
+        def error(self, msg, *args, **kwargs):
+            self._l.error(msg)
+    # Minimal shims for non-AWS
+    KinesisStreamEvent = dict
+    KinesisStreamRecord = object
+    class BatchProcessor:
+        def __init__(self, event_type):
+            pass
+    class EventType:
+        KinesisDataStreams = "KinesisDataStreams"
 
 from gql.client import AsyncClientSession
 

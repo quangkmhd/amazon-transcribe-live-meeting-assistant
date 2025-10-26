@@ -7,11 +7,18 @@ ECS Task Manager for Virtual Participants
 Handles direct termination of ECS containers using stored ARNs
 """
 
-import boto3
 import logging
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+# Conditional boto3 import
+try:
+    import boto3  # type: ignore
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None  # type: ignore
+    _BOTO3_AVAILABLE = False
 
 class ECSTaskManager:
     """
@@ -19,8 +26,16 @@ class ECSTaskManager:
     """
     
     def __init__(self):
-        self.ecs_client = boto3.client('ecs')
-        logger.info("ECSTaskManager initialized for direct termination using stored ARNs")
+        if _BOTO3_AVAILABLE and boto3:
+            try:
+                self.ecs_client = boto3.client('ecs')  # type: ignore
+                logger.info("ECSTaskManager initialized for direct termination using stored ARNs")
+            except Exception as e:
+                logger.warning(f"ECS client creation failed: {e}")
+                self.ecs_client = None  # type: ignore
+        else:
+            self.ecs_client = None  # type: ignore
+            logger.warning("ECS not available, task termination will be skipped")
     
     def stop_vp_task_by_arn(self, task_arn: str, cluster_arn: str, vp_id: str, reason: str = "User requested termination") -> bool:
         """
@@ -40,12 +55,16 @@ class ECSTaskManager:
             logger.info(f"Task ARN: {task_arn}")
             logger.info(f"Cluster ARN: {cluster_arn}")
             
+            if not self.ecs_client:
+                logger.warning(f"ECS client not available, cannot stop task for VP {vp_id}")
+                return False
+            
             if not task_arn or not cluster_arn:
                 logger.error(f"Missing ARNs for VP {vp_id}")
                 return False
             
             # Stop the task directly using stored ARNs
-            response = self.ecs_client.stop_task(
+            response = self.ecs_client.stop_task(  # type: ignore
                 cluster=cluster_arn,
                 task=task_arn,
                 reason=reason

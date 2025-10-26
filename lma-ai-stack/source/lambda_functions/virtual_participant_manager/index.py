@@ -9,7 +9,6 @@ Handles VP termination with registry-based task ARN lookup
 
 import os
 import json
-import boto3
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -20,12 +19,24 @@ from ecs_manager import ECSTaskManager
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
+# Conditional AWS clients
+try:
+    import boto3  # type: ignore
+    dynamodb = boto3.resource('dynamodb')
+    _BOTO3_AVAILABLE = True
+except Exception as e:
+    logger.warning(f"boto3 not available: {e}")
+    boto3 = None  # type: ignore
+    dynamodb = None  # type: ignore
+    _BOTO3_AVAILABLE = False
 
 class VirtualParticipantManager:
     def __init__(self, table_name: str):
-        self.table = dynamodb.Table(table_name)
+        if dynamodb:
+            self.table = dynamodb.Table(table_name)  # type: ignore
+        else:
+            self.table = None  # type: ignore
+            logger.warning("DynamoDB not available, VP operations will be limited")
         self.ecs_manager = ECSTaskManager()
         
     def get_current_timestamp(self) -> str:
@@ -113,7 +124,11 @@ class VirtualParticipantManager:
             if not kinesis_stream_name:
                 return False
             
-            kinesis = boto3.client('kinesis')
+            if not _BOTO3_AVAILABLE or not boto3:
+                logger.warning("boto3 not available, cannot send END event to Kinesis")
+                return False
+            
+            kinesis = boto3.client('kinesis')  # type: ignore
             
             end_call_event = {
                 'EventType': 'END',

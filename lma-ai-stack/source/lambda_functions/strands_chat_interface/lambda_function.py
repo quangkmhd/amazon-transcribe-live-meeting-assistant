@@ -10,7 +10,7 @@ Handles sendChatMessage GraphQL mutation and invokes AsyncAgentAssistOrchestrato
 
 import json
 import os
-import boto3
+import sys
 import uuid
 from datetime import datetime
 from typing import Dict, Any
@@ -20,8 +20,14 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-lambda_client = boto3.client('lambda')
+# Try to import boto3 (optional - for AWS Lambda invoke)
+try:
+    import boto3
+    lambda_client = boto3.client('lambda')
+    _LAMBDA_INVOKE_AVAILABLE = True
+except ImportError:
+    lambda_client = None
+    _LAMBDA_INVOKE_AVAILABLE = False
 
 def lambda_handler(event, context):
     """
@@ -84,18 +90,33 @@ def lambda_handler(event, context):
             "Owner": username,
         }
         
-        logger.info(f"STRANDS Chat Interface - Invoking AsyncAgentAssistOrchestrator: {orchestrator_arn}")
+        logger.info(f"STRANDS Chat Interface - Invoking AsyncAgentAssistOrchestrator")
         logger.info(f"STRANDS Chat Interface - Payload: {json.dumps(orchestrator_payload)}")
         
-        # Invoke AsyncAgentAssistOrchestrator asynchronously
-        # The response will be streamed via addChatToken mutations
-        response = lambda_client.invoke(
-            FunctionName=orchestrator_arn,
-            InvocationType='Event',  # Asynchronous invocation - don't wait for response
-            Payload=json.dumps(orchestrator_payload)
-        )
-        
-        logger.info(f"STRANDS Chat Interface - AsyncAgentAssistOrchestrator invoked successfully (async)")
+        # Try Lambda invoke first (if available), otherwise direct call
+        if _LAMBDA_INVOKE_AVAILABLE and lambda_client and orchestrator_arn:
+            # AWS Lambda async invoke
+            response = lambda_client.invoke(
+                FunctionName=orchestrator_arn,
+                InvocationType='Event',  # Asynchronous invocation - don't wait for response
+                Payload=json.dumps(orchestrator_payload)
+            )
+            logger.info(f"STRANDS Chat Interface - AsyncAgentAssistOrchestrator invoked via Lambda (async)")
+        else:
+            # Direct call fallback (AWS-free mode)
+            logger.info("STRANDS Chat Interface - Using direct call (AWS-free mode)")
+            try:
+                orchestrator_path = os.path.join(os.path.dirname(__file__), '../async_agent_assist_orchestrator')
+                if orchestrator_path not in sys.path:
+                    sys.path.insert(0, orchestrator_path)
+                from lambda_function import publish_lambda_agent_assist_transcript_segment
+                
+                # Call directly (synchronous for now)
+                result = publish_lambda_agent_assist_transcript_segment(orchestrator_payload)
+                logger.info("STRANDS Chat Interface - Direct call completed")
+            except Exception as e:
+                logger.error(f"STRANDS Chat Interface - Direct call failed: {str(e)}")
+                raise ValueError(f"Agent assist service unavailable: {str(e)}")
         
         # Return immediately with MessageId so UI can subscribe to token stream
         # The actual response will come via onAddChatToken subscription

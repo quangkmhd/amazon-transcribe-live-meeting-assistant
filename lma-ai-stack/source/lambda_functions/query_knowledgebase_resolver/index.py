@@ -3,71 +3,119 @@
 # See the LICENSE file in the project root for full license information.
 
 #
+# RAG Knowledge Base Query using Supabase + Gemini (AWS-free)
 import json
 import os
-import boto3
-from botocore.config import Config
+import sys
+import logging
 
-print("Boto3 version: ", boto3.__version__)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
-KB_ID = os.environ.get("KB_ID")
-KB_ACCOUNT_ID = os.environ.get("KB_ACCOUNT_ID")
+# Import RAG query engine and Gemini chat
+import os as _os
+rag_path = _os.path.join(_os.path.dirname(__file__), '../rag_query_resolver')
+gemini_path = _os.path.join(_os.path.dirname(__file__), '../gemini_chat_service')
 
-# use inference profile for model id and arn as Nova models require the use of inference profiles
-MODEL_ID = os.environ.get("MODEL_ID")
+if rag_path not in sys.path:
+    sys.path.insert(0, rag_path)
+if gemini_path not in sys.path:
+    sys.path.insert(0, gemini_path)
 
-# if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
-# else it is an Inference Profile and use the profile's ARN
-if MODEL_ID.startswith("anthropic"):
-    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
-else:
-    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{MODEL_ID}"
+# Import from different modules to avoid conflict
+import sys as _sys
+_rag_module_path = _os.path.join(_os.path.dirname(__file__), '../rag_query_resolver/index.py')
+_gemini_module_path = _os.path.join(_os.path.dirname(__file__), '../gemini_chat_service/index.py')
 
-KB_CLIENT = boto3.client(
-    service_name="bedrock-agent-runtime",
-    region_name=KB_REGION,
-    config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'})
-)
+# Import RAGQueryEngine from rag_query_resolver
+import importlib.util
+_rag_spec = importlib.util.spec_from_file_location("rag_resolver", _rag_module_path)
+_rag_module = importlib.util.module_from_spec(_rag_spec)
+_rag_spec.loader.exec_module(_rag_module)
+RAGQueryEngine = _rag_module.RAGQueryEngine
+
+# Import Gemini functions from gemini_chat_service
+_gemini_spec = importlib.util.spec_from_file_location("gemini_service", _gemini_module_path)
+_gemini_module = importlib.util.module_from_spec(_gemini_spec)
+_gemini_spec.loader.exec_module(_gemini_module)
+generate_gemini_response_non_streaming = _gemini_module.generate_gemini_response_non_streaming
+get_meeting_assistant_prompt = _gemini_module.get_meeting_assistant_prompt
 
 def get_kb_response(query, userId, isAdminUser, sessionId):
-    input = {
-        "input": {
-            'text': query
-        },
-        "retrieveAndGenerateConfiguration": {
-            'knowledgeBaseConfiguration': {
-                'knowledgeBaseId': KB_ID,
-                'modelArn': MODEL_ARN,
-                "retrievalConfiguration": {
-                    "vectorSearchConfiguration": {
-                        "filter": {
-                            "equals": {
-                                "key": "Owner",
-                                "value": userId
-                            }
+    """Query RAG knowledge base using Supabase + Gemini (replaces AWS Bedrock KB)"""
+    print(f"RAG Query Request - User: {userId}, Query: {query}")
+    
+    try:
+        # Use RAGQueryEngine for retrieval
+        rag_engine = RAGQueryEngine()
+        
+        # Assemble context from knowledge base
+        # Admin users can see all documents (don't filter by email)
+        user_email = 'admin@system.com' if isAdminUser else userId
+        
+        rag_result = rag_engine.assemble_context(
+            query=query,
+            user_email=user_email,
+            meeting_id=None,  # Search across all meetings
+            include_documents=True,
+            include_transcripts=True,
+            doc_match_count=5,
+            transcript_match_count=3
+        )
+        
+        # Build prompt for Gemini to generate answer based on context
+        context = rag_result.get('context', '')
+        
+        if not context:
+            return {
+                "output": {"text": "I couldn't find any relevant information in the knowledge base to answer your question."},
+                "citations": [],
+                "sessionId": sessionId
+            }
+        
+        # Generate answer using Gemini with RAG context
+        answer_prompt = f"""Based on the following context from the knowledge base, please answer the user's question.
+
+Context:
+{context}
+
+User Question: {query}
+
+Please provide a helpful, accurate response based solely on the context above. If the context doesn't contain enough information to answer the question, say so."""
+        
+        # Generate answer using Gemini (already imported above)
+        answer = generate_gemini_response_non_streaming(answer_prompt, get_meeting_assistant_prompt())
+        
+        # Format response to match Bedrock KB structure
+        resp = {
+            "output": {"text": answer},
+            "citations": [{
+                "retrievedReferences": [
+                    {
+                        "content": {"text": source.get('excerpt', '')},
+                        "metadata": {
+                            "CallId": source.get('meeting_id', source.get('document_id', 'unknown')),
+                            "type": source.get('type', 'unknown'),
+                            "score": source.get('relevance_score', source.get('similarity_score', 0))
                         }
                     }
-                }
-            },
-            'type': 'KNOWLEDGE_BASE'
+                    for source in rag_result.get('sources', [])
+                ]
+            }],
+            "sessionId": sessionId
         }
-    }
-    if isAdminUser:
-        print("Admin user, no retrieval filters")
-        input["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"].pop("retrievalConfiguration", None)
-    if sessionId:
-        input["sessionId"] = sessionId
-    print("Amazon Bedrock KB Request: ", input)
-    try:
-        resp = KB_CLIENT.retrieve_and_generate(**input)
+        
+        print("RAG Response: ", json.dumps(resp))
+        return resp
+        
     except Exception as e:
-        print("Amazon Bedrock KB Exception: ", e)
-        resp = {
-            "systemMessage": "Amazon Bedrock KB Error: " + str(e)
+        print("RAG Query Exception: ", e)
+        logger.error(f"Error in RAG query: {str(e)}")
+        return {
+            "systemMessage": "RAG Query Error: " + str(e),
+            "output": {"text": "An error occurred while processing your question."},
+            "citations": []
         }
-    print("Amazon Bedrock KB Response: ", json.dumps(resp))
-    return resp
 
 
 def markdown_response(kb_response):

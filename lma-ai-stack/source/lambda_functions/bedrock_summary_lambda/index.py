@@ -3,61 +3,54 @@
 # See the LICENSE file in the project root for full license information.
 
 #
-# Invokes Anthropic generate text API using requests module
-# see https://console.anthropic.com/docs/api/reference for more details
+# Summary generation using Gemini API (AWS-free replacement for Bedrock)
 
 import os
 import json
 import re
-import boto3
-from botocore.config import Config
+import requests
+from typing import Dict, Any, Optional
 
 import logging
 logger = logging.getLogger()
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 
-# grab environment variables
+# Gemini API Configuration (replaces AWS Bedrock)
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_MODEL = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-2.0-flash-exp')
+GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 
-# use inference profile for model id as Nova models require the use of inference profiles
-BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
-FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ['FETCH_TRANSCRIPT_LAMBDA_ARN']
+# Supabase configuration (replaces DynamoDB)
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+
+# Import Supabase client
+try:
+    from supabase import create_client, Client
+except ImportError:
+    import subprocess
+    subprocess.check_call(['pip', 'install', 'supabase'])
+    from supabase import create_client, Client
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# Legacy environment variables (for backward compatibility)
 PROCESS_TRANSCRIPT = (os.getenv('PROCESS_TRANSCRIPT', 'False') == 'True')
-TOKEN_COUNT = int(os.getenv('TOKEN_COUNT', '0')) # default 0 - do not truncate.
-S3_BUCKET_NAME = os.environ['S3_BUCKET_NAME']
-S3_PREFIX = os.environ['S3_PREFIX']
+TOKEN_COUNT = int(os.getenv('TOKEN_COUNT', '0'))  # default 0 - do not truncate
 
-# Table name and keys used for default and custom prompt templates items in DDB
-LLM_PROMPT_TEMPLATE_TABLE_NAME = os.environ["LLM_PROMPT_TEMPLATE_TABLE_NAME"]
-DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
-CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
-
-# Optional environment variables allow region / endpoint override for bedrock Boto3
-BEDROCK_REGION = os.environ["BEDROCK_REGION_OVERRIDE"] if "BEDROCK_REGION_OVERRIDE" in os.environ else os.environ["AWS_REGION"]
-BEDROCK_ENDPOINT_URL = os.environ.get("BEDROCK_ENDPOINT_URL", f'https://bedrock-runtime.{BEDROCK_REGION}.amazonaws.com')
-
-
-
-lambda_client = boto3.client('lambda')
-dynamodb_client = boto3.client('dynamodb')
-bedrock = boto3.client(
-    service_name='bedrock-runtime',
-    region_name=BEDROCK_REGION, 
-    endpoint_url=BEDROCK_ENDPOINT_URL,
-    config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'})
-)
-
-def get_templates_from_dynamodb(prompt_override):
+def get_templates_from_supabase(prompt_override):
+    """Get prompt templates from Supabase (replaces DynamoDB)"""
     templates = []
     prompt_template_str = None
 
     if prompt_override is not None:
-        print ("Prompt Template String override:", prompt_override)
+        print("Prompt Template String override:", prompt_override)
         prompt_template_str = prompt_override
         try:
             prompt_templates = json.loads(prompt_template_str)
             for k, v in prompt_templates.items():
                 prompt = v.replace("<br>", "\n")
-                templates.append({ k:prompt })
+                templates.append({k: prompt})
         except:
             prompt = prompt_template_str.replace("<br>", "\n")
             templates.append({
@@ -66,86 +59,150 @@ def get_templates_from_dynamodb(prompt_override):
 
     if prompt_template_str is None:
         try:
-            defaultPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': DEFAULT_PROMPT_TEMPLATES_PK}},
-                                                               TableName=LLM_PROMPT_TEMPLATE_TABLE_NAME)
-            customPromptTemplatesResponse = dynamodb_client.get_item(Key={'LLMPromptTemplateId': {'S': CUSTOM_PROMPT_TEMPLATES_PK}},
-                                                               TableName=LLM_PROMPT_TEMPLATE_TABLE_NAME)
-
-            defaultPromptTemplates = defaultPromptTemplatesResponse["Item"]
-            customPromptTemplates = customPromptTemplatesResponse["Item"]
+            # Query Supabase for prompt templates (replaces DynamoDB)
+            # Default template
+            default_response = supabase.table('prompt_templates')\
+                .select('templates')\
+                .eq('template_id', 'DefaultSummaryPromptTemplates')\
+                .single()\
+                .execute()
+            
+            # Custom template
+            custom_response = supabase.table('prompt_templates')\
+                .select('templates')\
+                .eq('template_id', 'CustomSummaryPromptTemplates')\
+                .single()\
+                .execute()
+            
+            # Extract the 'templates' JSONB field (not the whole row)
+            defaultPromptTemplates = default_response.data.get('templates', {}) if default_response.data else {}
+            customPromptTemplates = custom_response.data.get('templates', {}) if custom_response.data else {}
+            
             print("Default Prompt Template:", defaultPromptTemplates)
             print("Custom Template:", customPromptTemplates)
 
+            # Merge templates (custom overrides default)
             mergedPromptTemplates = {**defaultPromptTemplates, **customPromptTemplates}
             print("Merged Prompt Template:", mergedPromptTemplates)
 
             for k in sorted(mergedPromptTemplates):
-                if (k != "LLMPromptTemplateId" and k != "*Information*"):
-                    prompt = mergedPromptTemplates[k]['S']
-                    # skip if prompt value is empty, or set to 'NONE'
-                    if (prompt and prompt != 'NONE'):
-                        prompt = prompt.replace("<br>", "\n")
-                        index = k.find('#')
-                        k_stripped = k[index+1:]
-                        templates.append({ k_stripped:prompt })
+                prompt = mergedPromptTemplates[k]
+                # skip if prompt value is empty, or set to 'NONE'
+                if (prompt and prompt != 'NONE'):
+                    prompt = prompt.replace("<br>", "\n")
+                    # Handle keys with # prefix (e.g., "001#Summary" → "Summary")
+                    index = k.find('#')
+                    k_stripped = k[index+1:] if index >= 0 else k
+                    templates.append({k_stripped: prompt})
         except Exception as e:
-            print ("Exception:", e)
-            raise (e)
+            print("Exception loading templates from Supabase:", e)
+            # Fallback to default summary template
+            templates.append({
+                "Summary": """Please provide a summary of the following meeting transcript:
+
+{transcript}
+
+Include:
+- Key discussion points
+- Decisions made
+- Action items
+- Participants"""
+            })
 
     return templates
 
 def get_transcripts(callId):
-    payload = {
-        'CallId': callId, 
-        'ProcessTranscript': PROCESS_TRANSCRIPT, 
-        'TokenCount': TOKEN_COUNT,
-        'IncludeSpeaker': True
-    }
-    print("Invoking lambda", payload)
-    response = lambda_client.invoke(
-        FunctionName=FETCH_TRANSCRIPT_LAMBDA_ARN,
-        InvocationType='RequestResponse',
-        Payload=json.dumps(payload)
-    )
-    print("Lambda response:", response)
-    transcript_data = response['Payload'].read().decode()
-    transcript_json = json.loads(transcript_data)
-    print("Transcript JSON:", transcript_json)
-    return transcript_json
-
-def get_generated_text(response):
-    return response["output"]["message"]["content"][0]["text"]
-
-def call_bedrock(prompt_data):
-    modelId = BEDROCK_MODEL_ID
-    print("Bedrock request - ModelId", modelId)
-    message = {
-        "role": "user",
-        "content": [{"text": prompt_data}]
-    }
-
-    response = bedrock.converse(
-        modelId=modelId, 
-        messages=[message],
-        inferenceConfig={
-            "maxTokens": 512,
-            "temperature": 0
+    """Get transcripts directly from Supabase (replaces Lambda invoke)"""
+    print(f"Fetching transcripts for call {callId}")
+    
+    try:
+        # Import fetch_transcript logic directly
+        import sys
+        import os
+        fetch_path = os.path.join(os.path.dirname(__file__), '../fetch_transcript')
+        if fetch_path not in sys.path:
+            sys.path.insert(0, fetch_path)
+        
+        from index import lambda_handler as fetch_handler
+        
+        # Call fetch_transcript directly (no Lambda invoke)
+        payload = {
+            'CallId': callId,
+            'ProcessTranscript': PROCESS_TRANSCRIPT,
+            'TokenCount': TOKEN_COUNT,
+            'IncludeSpeaker': True
         }
-    )
-    generated_text = get_generated_text(response)
-    print("Bedrock response: ", json.dumps(generated_text))
-    return generated_text
+        
+        transcript_json = fetch_handler(payload, None)
+        print("Transcript JSON:", transcript_json)
+        return transcript_json
+        
+    except Exception as e:
+        logger.error(f"Error fetching transcripts: {str(e)}")
+        return {
+            'transcript': '',
+            'metadata': {'CallId': callId}
+        }
+
+def call_gemini(prompt_data):
+    """Call Gemini API (replaces AWS Bedrock)"""
+    print(f"Gemini request - Model: {GEMINI_MODEL}")
+    
+    try:
+        url = f"{GEMINI_API_BASE_URL}/{GEMINI_MODEL}:generateContent"
+        params = {'key': GEMINI_API_KEY}
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt_data}]
+            }],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 1024,
+                "topP": 0.95
+            }
+        }
+        
+        response = requests.post(
+            url,
+            params=params,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Gemini API error: {response.status_code} - {response.text}")
+            return f"Error: API returned {response.status_code}"
+        
+        result = response.json()
+        
+        # Extract text from response
+        if 'candidates' in result and len(result['candidates']) > 0:
+            candidate = result['candidates'][0]
+            if 'content' in candidate:
+                parts = candidate['content'].get('parts', [])
+                if parts and 'text' in parts[0]:
+                    generated_text = parts[0]['text']
+                    print("Gemini response: ", json.dumps(generated_text))
+                    return generated_text
+        
+        return "No summary generated"
+        
+    except Exception as e:
+        logger.error(f"Error calling Gemini: {str(e)}")
+        return f"Error: {str(e)}"
 
 def generate_summary(transcript, prompt_override):
+    """Generate summary using Gemini (replaces Bedrock)"""
     # first check to see if this is one prompt, or many prompts as a json
-    templates = get_templates_from_dynamodb(prompt_override)
+    templates = get_templates_from_supabase(prompt_override)
     result = {}
     for item in templates:
         key = list(item.keys())[0]
         prompt = item[key]
         prompt = prompt.replace("{transcript}", transcript)
         print("Prompt:", prompt)
-        response = call_bedrock(prompt)
+        response = call_gemini(prompt)  # Use Gemini instead of Bedrock
         print("API Response:", response)
         result[key] = response
     if len(result.keys()) == 1:
@@ -180,25 +237,36 @@ def format_summary(summary, metadata):
     summary_dict["MEETING DURATION (SECONDS)"]=int(metadata["TotalConversationDurationMillis"]/1000)
     return json.dumps(summary_dict)
 
-def write_to_s3(callId, metadata, transcript, summary):
-    s3 = boto3.client('s3')
-    filename = posixify_filename(f"{callId}")
-    summary_file_key = f"{S3_PREFIX}{filename}-SUMMARY.txt"
-    transcript_file_key = f"{S3_PREFIX}{filename}-TRANSCRIPT.txt"
-    summary = format_summary(summary, metadata)
-    kbMetadata = getKBMetadata(metadata)
-    print(f"KB Summary: {summary}")
-    print(f"KB Metadata: {kbMetadata}")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=summary_file_key, Body=summary)
-    print(f"Wrote summary to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{summary_file_key}.metadata.json", Body=kbMetadata)
-    print(f"Wrote summary metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=transcript_file_key, Body=transcript)
-    print(f"Wrote transcript to S3: s3://{S3_BUCKET_NAME}/{transcript_file_key}")
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=f"{transcript_file_key}.metadata.json", Body=kbMetadata)
-    print(f"Wrote transcript metadata to S3: s3://{S3_BUCKET_NAME}/{summary_file_key}.metadata.json")
+def write_to_supabase(callId, metadata, transcript, summary):
+    """Store summary in Supabase (replaces S3)"""
+    try:
+        filename = posixify_filename(f"{callId}")
+        summary_formatted = format_summary(summary, metadata)
+        
+        # Store in Supabase table instead of S3
+        summary_record = {
+            'meeting_id': callId,
+            'summary': summary_formatted,
+            'transcript': transcript,
+            'metadata': metadata,
+            'created_at': metadata.get('CreatedAt', ''),
+            'owner_email': metadata.get('Owner', 'unknown@example.com')
+        }
+        
+        # Upsert into meeting_summaries table
+        response = supabase.table('meeting_summaries')\
+            .upsert(summary_record, on_conflict='meeting_id')\
+            .execute()
+        
+        print(f"Wrote summary to Supabase for meeting {callId}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error writing summary to Supabase: {str(e)}")
+        return False
 
 def handler(event, context):
+    """Lambda handler - now uses Gemini + Supabase (AWS-free)"""
     print("Received event: ", json.dumps(event))
     callId = event['CallId']
     try:
@@ -211,8 +279,8 @@ def handler(event, context):
             prompt_override = event['Prompt']
         summary = generate_summary(transcript, prompt_override)
         if not prompt_override:
-            # only write to S3 when using default summary prompt (eg not invoked via QnABot)
-            write_to_s3(callId, metadata, transcript, summary)
+            # Store to Supabase instead of S3 (AWS-free)
+            write_to_supabase(callId, metadata, transcript, summary)
     except Exception as e:
         print(e)
         summary = 'An error occurred.'

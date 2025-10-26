@@ -5,55 +5,89 @@
 #
 import os
 import io
-import boto3
-from boto3.dynamodb.conditions import Key, Attr
-from botocore.exceptions import ClientError
 import json
-import csv
 import logging
 import re
 
-# grab environment variables
-LCA_CALL_EVENTS_TABLE = os.environ['LCA_CALL_EVENTS_TABLE']
+# Supabase client (AWS-free replacement for DynamoDB)
+try:
+    from supabase import create_client, Client
+except ImportError:
+    import subprocess
+    subprocess.check_call(['pip', 'install', 'supabase'])
+    from supabase import create_client, Client
 
-runtime = boto3.client('runtime.sagemaker')
 logger = logging.getLogger(__name__)
+
+# Supabase configuration
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 issue_remover = re.compile('<span class=\'issue-pill\'>Issue Detected</span>')
 html_remover = re.compile('<[^>]*>')
 filler_remover = re.compile('(^| )([Uu]m|[Uu]h|[Ll]ike|[Mm]hm)[,]?')
 
-ddb = boto3.resource('dynamodb')
-ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
-
 def get_call_metadata(callid):
-    pk = 'c#'+callid
-    print(f"Call metadata PK: {pk}")
+    """Get call metadata from Supabase (replaces DynamoDB)"""
+    print(f"Fetching call metadata for: {callid}")
     try:
-        metadata = ddbTable.get_item(
-            Key={'PK': pk, 'SK': pk},
-            TableName=LCA_CALL_EVENTS_TABLE
-            )
-    except ClientError as err:
-        logger.error("Error getting metadata from LCA Call Events table %s: %s",
-                     err.response['Error']['Code'], err.response['Error']['Message'])
-        raise
-    else:
-        return metadata['Item']
+        # Query meetings table in Supabase
+        response = supabase.table('meetings')\
+            .select('*')\
+            .eq('meeting_id', callid)\
+            .single()\
+            .execute()
+        
+        if response.data:
+            return response.data
+        else:
+            logger.warning(f"No metadata found for call {callid}")
+            return {}
+            
+    except Exception as err:
+        logger.error(f"Error getting metadata from Supabase: {str(err)}")
+        # Return minimal metadata to avoid breaking downstream
+        return {
+            'CallId': callid,
+            'CreatedAt': '',
+            'UpdatedAt': '',
+            'Owner': 'unknown@example.com'
+        }
 
 def get_transcripts(callid):
-    pk = 'trs#'+callid
-    print(f"Call transcripts PK: {pk}")
+    """Get transcripts from Supabase (replaces DynamoDB)"""
+    print(f"Fetching transcripts for: {callid}")
     try:
-        response = ddbTable.query(KeyConditionExpression=Key('PK').eq(pk), FilterExpression=(
-            Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER')) & Attr('IsPartial').eq(False))
-        # response = ddbTable.query(KeyConditionExpression=Key('PK').eq(pk))
-    except ClientError as err:
-        logger.error("Error getting transcripts from LCA Call Events table %s: %s",
-                     err.response['Error']['Code'], err.response['Error']['Message'])
-        raise
-    else:
-        return response['Items']
+        # Query transcript_events table in Supabase
+        response = supabase.table('transcript_events')\
+            .select('*')\
+            .eq('meeting_id', callid)\
+            .eq('is_final', True)\
+            .order('end_time', desc=False)\
+            .execute()
+        
+        # Map Supabase fields to expected DynamoDB format
+        items = []
+        for row in response.data:
+            item = {
+                'CallId': row.get('meeting_id'),
+                'Channel': row.get('channel', 'CALLER'),  # Map channel
+                'Transcript': row.get('transcript', ''),
+                'Speaker': row.get('speaker_name') or row.get('speaker_number', 'Unknown'),
+                'StartTime': row.get('start_time', 0),
+                'EndTime': row.get('end_time', 0),
+                'IsPartial': False  # Already filtered
+            }
+            items.append(item)
+        
+        return items
+            
+    except Exception as err:
+        logger.error(f"Error getting transcripts from Supabase: {str(err)}")
+        return []
 
 
 def preprocess_transcripts(transcripts, condense, includeSpeaker):

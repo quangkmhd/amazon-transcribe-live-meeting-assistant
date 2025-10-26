@@ -4,8 +4,7 @@
 
 import os
 import json
-import boto3
-from botocore.config import Config
+import requests
 import re
 from datetime import datetime, timedelta
 import logging
@@ -13,45 +12,58 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Environment variables
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
-BEDROCK_REGION = os.environ.get("BEDROCK_REGION_OVERRIDE", os.environ.get("AWS_REGION", "us-east-1"))
-BEDROCK_ENDPOINT_URL = os.environ.get("BEDROCK_ENDPOINT_URL", f'https://bedrock-runtime.{BEDROCK_REGION}.amazonaws.com')
+# Gemini API Configuration (replaces AWS Bedrock)
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_MODEL = os.environ.get('GEMINI_CHAT_MODEL', 'gemini-2.0-flash-exp')
+GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 
-# Initialize Bedrock client
-bedrock = boto3.client(
-    service_name='bedrock-runtime',
-    region_name=BEDROCK_REGION, 
-    endpoint_url=BEDROCK_ENDPOINT_URL,
-    config=Config(retries={'max_attempts': 50, 'mode': 'adaptive'})
-)
-
-def get_generated_text(response):
-    """Extract generated text from Bedrock response"""
-    return response["output"]["message"]["content"][0]["text"]
-
-def call_bedrock(prompt_data):
-    """Call Bedrock to parse meeting invitation"""
-    modelId = BEDROCK_MODEL_ID
-    logger.info(f"Bedrock request - ModelId: {modelId}")
+def call_gemini(prompt_data):
+    """Call Gemini API to parse meeting invitation (replaces AWS Bedrock)"""
+    logger.info(f"Gemini request - Model: {GEMINI_MODEL}")
     
-    message = {
-        "role": "user",
-        "content": [{"text": prompt_data}]
-    }
-
-    response = bedrock.converse(
-        modelId=modelId, 
-        messages=[message],
-        inferenceConfig={
-            "maxTokens": 1024,
-            "temperature": 0
+    try:
+        url = f"{GEMINI_API_BASE_URL}/{GEMINI_MODEL}:generateContent"
+        params = {'key': GEMINI_API_KEY}
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt_data}]
+            }],
+            "generationConfig": {
+                "temperature": 0,  # Deterministic for parsing
+                "maxOutputTokens": 1024,
+                "topP": 0.95
+            }
         }
-    )
-    
-    generated_text = get_generated_text(response)
-    logger.info(f"Bedrock response: {generated_text}")
-    return generated_text
+        
+        response = requests.post(
+            url,
+            params=params,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Gemini API error: {response.status_code} - {response.text}")
+            return f"Error: API returned {response.status_code}"
+        
+        result = response.json()
+        
+        # Extract text from response
+        if 'candidates' in result and len(result['candidates']) > 0:
+            candidate = result['candidates'][0]
+            if 'content' in candidate:
+                parts = candidate['content'].get('parts', [])
+                if parts and 'text' in parts[0]:
+                    generated_text = parts[0]['text']
+                    logger.info(f"Gemini response: {generated_text}")
+                    return generated_text
+        
+        return "{}"
+        
+    except Exception as e:
+        logger.error(f"Error calling Gemini: {str(e)}")
+        return f"Error: {str(e)}"
 
 def create_parsing_prompt(meeting_invitation_text):
     """Create a prompt for parsing meeting invitation"""
@@ -104,10 +116,10 @@ JSON Response:
     return prompt
 
 def parse_meeting_invitation(invitation_text):
-    """Parse meeting invitation using Bedrock"""
+    """Parse meeting invitation using Gemini (replaces Bedrock)"""
     try:
         prompt = create_parsing_prompt(invitation_text)
-        response = call_bedrock(prompt)
+        response = call_gemini(prompt)
         
         # Try to parse the JSON response
         try:

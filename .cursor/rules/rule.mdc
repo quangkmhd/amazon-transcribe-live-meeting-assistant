@@ -19,6 +19,7 @@ Step 2. System Audit
 - Propose optimized architecture flow diagrams or textual mappings for migration.
 
 Step 3. Testing Framework  
+- Always use MCP context7 for knowledge about code, core_knowledge, 
 - Always use MCP Playwright for testing UI and automation.  
 - Always use MCP Supabase for database reading and testing.  
 - Execute test coverage reports and identify failing test cases.  

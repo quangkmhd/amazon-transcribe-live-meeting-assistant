@@ -8,6 +8,12 @@ from os import getenv
 import uuid
 import asyncio
 from sentiment import ComprehendWeightedSentiment
+try:
+    from sentiment import detect_sentiment_async as gemini_detect_sentiment
+    _GEMINI_SENTIMENT_AVAILABLE = True
+except ImportError:
+    gemini_detect_sentiment = None
+    _GEMINI_SENTIMENT_AVAILABLE = False
 import jwt
 from jwt import PyJWKClient
 
@@ -438,17 +444,43 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
 
 
 async def detect_sentiment(text: str, COMPREHEND_CLIENT: ComprehendClient, COMPREHEND_LANGUAGE_CODE) -> DetectSentimentResponseTypeDef:
-    loop = asyncio.get_running_loop()
-    sentiment_future = loop.run_in_executor(
-        None,
-        lambda: COMPREHEND_CLIENT.detect_sentiment(
-            Text=text,
-            LanguageCode=COMPREHEND_LANGUAGE_CODE,
-        ),
-    )
-    results = await asyncio.gather(sentiment_future)
-    result = results[0]
-    return result
+    """
+    Detect sentiment using Gemini (preferred) or Comprehend (fallback)
+    Returns Comprehend-compatible response format
+    """
+    # Try Gemini first (AWS-free)
+    if _GEMINI_SENTIMENT_AVAILABLE and gemini_detect_sentiment:
+        try:
+            result = await gemini_detect_sentiment(text, COMPREHEND_LANGUAGE_CODE)
+            return result  # type: ignore
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Gemini sentiment failed, falling back to Comprehend: {e}")
+    
+    # Fallback to Comprehend if Gemini not available or failed
+    if COMPREHEND_CLIENT:
+        loop = asyncio.get_running_loop()
+        sentiment_future = loop.run_in_executor(
+            None,
+            lambda: COMPREHEND_CLIENT.detect_sentiment(
+                Text=text,
+                LanguageCode=COMPREHEND_LANGUAGE_CODE,
+            ),
+        )
+        results = await asyncio.gather(sentiment_future)
+        result = results[0]
+        return result  # type: ignore
+    
+    # No sentiment service available - return neutral
+    return {
+        'Sentiment': 'NEUTRAL',
+        'SentimentScore': {
+            'Positive': 0.0,
+            'Negative': 0.0,
+            'Neutral': 1.0,
+            'Mixed': 0.0
+        }
+    }  # type: ignore
 
 
 async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_args: Dict) -> Dict[str, object]:

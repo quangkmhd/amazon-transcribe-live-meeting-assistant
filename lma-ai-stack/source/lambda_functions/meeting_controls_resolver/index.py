@@ -8,9 +8,6 @@ from os import environ
 import io
 from urllib.parse import urlparse
 import ast
-import boto3
-from boto3.dynamodb.conditions import Key, Attr
-from botocore.exceptions import ClientError
 import json
 import logging
 import re
@@ -19,25 +16,62 @@ from gql.dsl import DSLMutation, DSLSchema, DSLQuery, dsl_gql
 from appsync_utils import AppsyncRequestsGqlClient
 from datetime import datetime, timezone
 
-APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
-appsync_client = AppsyncRequestsGqlClient(
-    url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
+# Conditional AWS imports
+try:
+    import boto3  # type: ignore
+    from boto3.dynamodb.conditions import Key, Attr  # type: ignore
+    from botocore.exceptions import ClientError  # type: ignore
+    _BOTO3_IMPORT_OK = True
+except ImportError:
+    boto3 = None  # type: ignore
+    Key = None  # type: ignore
+    Attr = None  # type: ignore
+    ClientError = Exception  # type: ignore
+    _BOTO3_IMPORT_OK = False
 
-# grab environment variables
-LCA_CALL_EVENTS_TABLE = environ['LCA_CALL_EVENTS_TABLE']
-S3_BUCKET_NAME = environ['S3_BUCKET_NAME']
-S3_RECORDINGS_PREFIX = environ['S3_RECORDINGS_PREFIX']
-S3_TRANSCRIPTS_PREFIX = environ['S3_TRANSCRIPTS_PREFIX']
+APPSYNC_GRAPHQL_URL = environ.get("APPSYNC_GRAPHQL_URL", "")
+if APPSYNC_GRAPHQL_URL:
+    appsync_client = AppsyncRequestsGqlClient(
+        url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=True)
+else:
+    appsync_client = None  # type: ignore
+    logger.warning("APPSYNC_GRAPHQL_URL not set, GraphQL operations will fail")
+
+# grab environment variables - use .get() for safety
+LCA_CALL_EVENTS_TABLE = environ.get('LCA_CALL_EVENTS_TABLE', '')
+S3_BUCKET_NAME = environ.get('S3_BUCKET_NAME', '')
+S3_RECORDINGS_PREFIX = environ.get('S3_RECORDINGS_PREFIX', 'recordings/')
+S3_TRANSCRIPTS_PREFIX = environ.get('S3_TRANSCRIPTS_PREFIX', 'transcripts/')
 VP_TABLE_NAME = environ.get('VP_TABLE_NAME')
 VP_TASK_REGISTRY_TABLE_NAME = environ.get('VP_TASK_REGISTRY_TABLE_NAME')
 KINESIS_STREAM_NAME = environ.get('KINESIS_STREAM_NAME')
 
 logger = logging.getLogger(__name__)
-ddb = boto3.resource('dynamodb')
-ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
-s3_client = boto3.client('s3')
-kinesis_client = boto3.client('kinesis')
-ecs_client = boto3.client('ecs')
+
+# Conditional AWS client initialization
+if _BOTO3_IMPORT_OK and boto3:
+    try:
+        ddb = boto3.resource('dynamodb')  # type: ignore
+        ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)  # type: ignore
+        s3_client = boto3.client('s3')  # type: ignore
+        kinesis_client = boto3.client('kinesis')  # type: ignore
+        ecs_client = boto3.client('ecs')  # type: ignore
+        _AWS_AVAILABLE = True
+    except Exception as e:
+        logger.warning(f"AWS services not available: {e}")
+        ddb = None  # type: ignore
+        ddbTable = None  # type: ignore
+        s3_client = None  # type: ignore
+        kinesis_client = None  # type: ignore
+        ecs_client = None  # type: ignore
+        _AWS_AVAILABLE = False
+else:
+    ddb = None  # type: ignore
+    ddbTable = None  # type: ignore
+    s3_client = None  # type: ignore
+    kinesis_client = None  # type: ignore
+    ecs_client = None  # type: ignore
+    _AWS_AVAILABLE = False
 
 ### Common functions
 
@@ -51,34 +85,41 @@ def posixify_filename(filename: str) -> str:
     return posix_filename
 
 def delete_recordings_transcripts(callid):
-    filename = posixify_filename(f"{callid}")
-    prefix = f"{S3_RECORDINGS_PREFIX}{filename}"
+    if not s3_client:
+        logger.warning(f"S3 client not available, cannot delete recordings for {callid}")
+        return
+    
+    try:
+        filename = posixify_filename(f"{callid}")
+        prefix = f"{S3_RECORDINGS_PREFIX}{filename}"
 
-    response = s3_client.list_objects_v2(
-        Bucket=S3_BUCKET_NAME,
-        Prefix=prefix
-    )
-    if 'Contents' in response:
-        for object in response['Contents']:
-            print('Deleting ', object['Key'])
-            response = s3_client.delete_object(
-                Bucket=S3_BUCKET_NAME,
-                Key=object['Key']
-            )
+        response = s3_client.list_objects_v2(  # type: ignore
+            Bucket=S3_BUCKET_NAME,
+            Prefix=prefix
+        )
+        if 'Contents' in response:
+            for object in response['Contents']:
+                print('Deleting ', object['Key'])
+                response = s3_client.delete_object(  # type: ignore
+                    Bucket=S3_BUCKET_NAME,
+                    Key=object['Key']
+                )
 
-    prefix = f"{S3_TRANSCRIPTS_PREFIX}{filename}"
-    response = s3_client.list_objects_v2(
-        Bucket=S3_BUCKET_NAME,
-        Prefix=prefix
-    )
+        prefix = f"{S3_TRANSCRIPTS_PREFIX}{filename}"
+        response = s3_client.list_objects_v2(  # type: ignore
+            Bucket=S3_BUCKET_NAME,
+            Prefix=prefix
+        )
 
-    if 'Contents' in response:
-        for object in response['Contents']:
-            print('Deleting ', object['Key'])
-            response = s3_client.delete_object(
-                Bucket=S3_BUCKET_NAME,
-                Key=object['Key']
-            )
+        if 'Contents' in response:
+            for object in response['Contents']:
+                print('Deleting ', object['Key'])
+                response = s3_client.delete_object(  # type: ignore
+                    Bucket=S3_BUCKET_NAME,
+                    Key=object['Key']
+                )
+    except Exception as e:
+        logger.error(f"Error deleting S3 recordings/transcripts: {e}")
 
     return
 

@@ -13,13 +13,60 @@ from datetime import datetime
 from eventprocessor_utils import (
     get_transcription_ttl
 )
-from lex_utils import recognize_text_lex
 
-# third-party imports from Lambda layer
-from aws_lambda_powertools import Logger
-from aws_lambda_powertools.utilities.typing import LambdaContext
-import boto3
-from botocore.config import Config as BotoCoreConfig
+# Try to import Supabase utilities (AWS-free alternative to Kinesis)
+try:
+    from supabase_utils import realtime as supabase_realtime
+    _SUPABASE_AVAILABLE = True
+except ImportError:
+    supabase_realtime = None
+    _SUPABASE_AVAILABLE = False
+
+# Conditional import - Lex is optional (can use Lambda/Gemini agent assist instead)
+try:
+    from lex_utils import recognize_text_lex
+    _LEX_AVAILABLE = True
+except ImportError:
+    _LEX_AVAILABLE = False
+    def recognize_text_lex(*args, **kwargs):
+        raise NotImplementedError("Lex utils not available - use IS_LAMBDA_AGENT_ASSIST_ENABLED instead")
+
+# third-party imports from Lambda layer - with fallbacks for non-AWS environments
+try:
+    from aws_lambda_powertools import Logger  # type: ignore
+    from aws_lambda_powertools.utilities.typing import LambdaContext  # type: ignore
+except ImportError:
+    import logging
+    class Logger:  # Minimal shim
+        def __init__(self, location: str = "", child: bool = False):
+            self._l = logging.getLogger(__name__)
+            if not self._l.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+                handler.setFormatter(formatter)
+                self._l.addHandler(handler)
+            self._l.setLevel(logging.INFO)
+        def info(self, msg, *args, **kwargs):
+            self._l.info(msg)
+        def debug(self, msg, *args, **kwargs):
+            self._l.debug(msg)
+        def warning(self, msg, *args, **kwargs):
+            self._l.warning(msg)
+        def error(self, msg, *args, **kwargs):
+            self._l.error(msg)
+        def inject_lambda_context(self, func):
+            return func
+    class LambdaContext:  # type: ignore
+        pass
+
+try:
+    import boto3  # type: ignore
+    from botocore.config import Config as BotoCoreConfig  # type: ignore
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None  # type: ignore
+    BotoCoreConfig = None  # type: ignore
+    _BOTO3_AVAILABLE = False
 
 
 # pylint: enable=import-error
@@ -38,23 +85,40 @@ else:
     LexRuntimeV2Client = object
     RecognizeTextResponseTypeDef = object
 
-BOTO3_SESSION: Boto3Session = boto3.Session()
-CLIENT_CONFIG = BotoCoreConfig(
-    retries={"mode": "adaptive", "max_attempts": 3},
-)
+if _BOTO3_AVAILABLE:
+    try:
+        BOTO3_SESSION: Boto3Session = boto3.Session()  # type: ignore
+        CLIENT_CONFIG = BotoCoreConfig(  # type: ignore
+            retries={"mode": "adaptive", "max_attempts": 3},
+        )
 
-LAMBDA_CLIENT: LambdaClient = BOTO3_SESSION.client(
-    "lambda",
-    config=CLIENT_CONFIG,
-)
-KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client(
-    "kinesis"
-)
+        LAMBDA_CLIENT: LambdaClient = BOTO3_SESSION.client(  # type: ignore
+            "lambda",
+            config=CLIENT_CONFIG,
+        )
+        KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client(  # type: ignore
+            "kinesis"
+        )
 
-LEXV2_CLIENT: LexRuntimeV2Client = BOTO3_SESSION.client(
-    "lexv2-runtime",
-    config=CLIENT_CONFIG,
-)
+        LEXV2_CLIENT: LexRuntimeV2Client = BOTO3_SESSION.client(  # type: ignore
+            "lexv2-runtime",
+            config=CLIENT_CONFIG,
+        )
+    except Exception as e:
+        # boto3 available but AWS not configured (no credentials/region)
+        import logging
+        logging.getLogger(__name__).info(f"AWS services not available: {e}")
+        BOTO3_SESSION = None  # type: ignore
+        CLIENT_CONFIG = None  # type: ignore
+        LAMBDA_CLIENT = None  # type: ignore
+        KINESIS_CLIENT = None  # type: ignore
+        LEXV2_CLIENT = None  # type: ignore
+else:
+    BOTO3_SESSION = None  # type: ignore
+    CLIENT_CONFIG = None  # type: ignore
+    LAMBDA_CLIENT = None  # type: ignore
+    KINESIS_CLIENT = None  # type: ignore
+    LEXV2_CLIENT = None  # type: ignore
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
@@ -76,23 +140,49 @@ DYNAMODB_TABLE_NAME = getenv("DYNAMODB_TABLE_NAME", "")
 def write_agent_assist_to_kds(
     message: Dict[str, Any]
 ):
+    """
+    Write agent assist event to data stream
+    Supports: Kinesis (AWS) OR Supabase Realtime (AWS-free)
+    """
     callId = message.get("CallId", None)
     message['EventType'] = "ADD_AGENT_ASSIST"
 
-    if callId:
+    if not callId:
+        return
+    
+    event_written = False
+    
+    # Try Supabase Realtime first (AWS-free)
+    if _SUPABASE_AVAILABLE and supabase_realtime:
         try:
-            KINESIS_CLIENT.put_record(
+            success = supabase_realtime.publish_agent_assist_event(
+                call_id=callId,
+                transcript=message.get('Transcript', ''),
+                segment_id=message.get('SegmentId', ''),
+                **message
+            )
+            if success:
+                LOGGER.info("✅ AGENT_ASSIST event published to Supabase Realtime")
+                event_written = True
+        except Exception as error:
+            LOGGER.warning(f"Supabase Realtime publish failed: {error}, trying Kinesis")
+    
+    # Fallback to Kinesis if Supabase failed or unavailable
+    if not event_written and KINESIS_CLIENT and CALL_DATA_STREAM_NAME:
+        try:
+            KINESIS_CLIENT.put_record(  # type: ignore
                 StreamName=CALL_DATA_STREAM_NAME,
                 PartitionKey=callId,
                 Data=json.dumps(message)
             )
-            LOGGER.info("Write AGENT_ASSIST event to KDS: %s",
-                        json.dumps(message))
+            LOGGER.info("Write AGENT_ASSIST event to Kinesis")
+            event_written = True
         except Exception as error:
-            LOGGER.error(
-                "Error writing AGENT_ASSIST event to KDS ",
-                extra=error,
-            )
+            LOGGER.error(f"Error writing AGENT_ASSIST event to Kinesis: {error}")
+    
+    if not event_written:
+        LOGGER.info("[LOCAL] AGENT_ASSIST event (no stream): %s", json.dumps(message))
+    
     return
 
 
@@ -294,50 +384,58 @@ def get_lambda_agent_assist_transcript(
     content: str,
     owner_email: Optional[str] = None,
 ):
-    """Sends Lambda Agent Assist Requests"""
+    """Sends Agent Assist Requests directly to Gemini Chat Service (AWS-free)"""
     call_id = transcript_segment_args["CallId"]
+    message_id = transcript_segment_args.get("MessageId", str(uuid.uuid4()))
 
-    payload = {
-        'text': content,
-        'call_id': call_id,
-        'transcript_segment_args': transcript_segment_args,
-        'dynamodb_table_name': DYNAMODB_TABLE_NAME,
-        'dynamodb_pk': f"c#{call_id}",
-        'Owner': owner_email or 'unknown@example.com',  # Pass owner for RAG filtering
-    }
+    LOGGER.info("Agent Assist Gemini Request: %s", content)
 
-    LOGGER.info("Agent Assist Lambda Request: %s", content)
-
-    lambda_response = LAMBDA_CLIENT.invoke(
-        FunctionName=LAMBDA_AGENT_ASSIST_FUNCTION_ARN,
-        InvocationType='RequestResponse',
-        Payload=json.dumps(payload)
-    )
-
-    LOGGER.info("Agent Assist Lambda Response: ", extra=lambda_response)
-
-    transcript_segment = {}
-    transcript = process_lambda_response(lambda_response)
-    if transcript:
-        transcript_segment = {
-            **transcript_segment_args, "Transcript": transcript}
-
-    return transcript_segment
-
-
-def process_lambda_response(lambda_response):
-    message = ""
+    # Direct call to Gemini chat service (no Lambda invoke)
     try:
-        payload = json.loads(lambda_response.get(
-            "Payload").read().decode("utf-8"))
-        # Lambda result payload should include field 'message'
-        message = payload["message"]
+        # Import Gemini chat service
+        import sys
+        import os
+        gemini_path = os.path.join(os.path.dirname(__file__), '../gemini_chat_service')
+        if gemini_path not in sys.path:
+            sys.path.insert(0, gemini_path)
+        
+        from index import lambda_handler as gemini_handler
+        
+        # Prepare event for Gemini chat service
+        gemini_event = {
+            'CallId': call_id,
+            'MessageId': message_id,
+            'Message': content,
+            'Owner': owner_email or 'unknown@example.com',
+            'EnableStreaming': False  # Use non-streaming for synchronous response
+        }
+        
+        # Call Gemini chat service directly
+        response = gemini_handler(gemini_event, None)
+        
+        # Extract message from response
+        transcript = response.get('message', '')
+        
+        LOGGER.info("Agent Assist Gemini Response received")
+        
+        transcript_segment = {}
+        if transcript:
+            transcript_segment = {
+                **transcript_segment_args, "Transcript": transcript}
+        
+        return transcript_segment
+        
     except Exception as error:
         LOGGER.error(
-            "Agent assist Lambda result payload parsing exception. Lambda must return object with key 'message'",
-            extra=error,
+            "Agent assist Gemini call exception: %s",
+            error,
         )
-    return message
+        # Return error message to user
+        transcript_segment = {
+            **transcript_segment_args, 
+            "Transcript": f"Error: Unable to generate response. {str(error)}"
+        }
+        return transcript_segment
 
 
 def transform_segment_to_issues_agent_assist(
