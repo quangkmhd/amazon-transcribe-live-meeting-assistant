@@ -45,7 +45,7 @@ export async function insertTranscriptEvent(data: {
     const { error } = await supabase
         .from('transcript_events')
         .upsert(data, {
-            onConflict: 'meeting_id,start_time,speaker_number',
+            onConflict: 'meeting_id,start_time,end_time,speaker_number',
             ignoreDuplicates: false, // Update if exists
         });
     
