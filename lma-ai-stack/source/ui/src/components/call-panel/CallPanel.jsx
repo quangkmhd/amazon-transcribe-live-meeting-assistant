@@ -792,7 +792,7 @@ const CallInProgressTranscript = ({
         end_ms: seg.endTime * 1000,
         is_final: !seg.isPartial,
         channel: seg.channel,
-        language: seg.language || seg.detected_language || 'en',  // ✅ Add language from DB
+        language: seg.language || seg.detected_language || undefined,  // Don't default to 'en', let render handle it
         translation_status: undefined,  // ✅ FIX: Use undefined (not null) to match Soniox original tokens
         _isDbSegment: true, // Flag to identify database segments
         _originalSegment: seg, // Keep original for sentiment/metadata

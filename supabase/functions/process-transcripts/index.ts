@@ -127,6 +127,8 @@ serve(async (req) => {
         start_time: event.start_time,
         end_time: event.end_time,
         is_partial: false,
+        language: event.language,
+        translation_status: event.translation_status,
     }));
 
     for (const event of processedEvents) {
