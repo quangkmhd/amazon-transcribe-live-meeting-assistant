@@ -25,6 +25,11 @@ export async function insertTranscriptEvent(data: {
     start_time: number;
     end_time: number;
     is_final: boolean;
+    // ✅ NEW: Translation fields
+    translated_text?: string;
+    target_language?: string;
+    translation_status?: string;
+    language?: string;  // ✅ FIXED: Use 'language' column (already exists in DB)
 }) {
     const startTime = Date.now();
     const logger = getPipelineLogger(data.meeting_id);

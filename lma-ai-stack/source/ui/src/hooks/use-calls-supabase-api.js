@@ -219,6 +219,11 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
       sentiment,
       sentiment_score: sentimentScore,
       sentiment_weighted: sentimentWeighted,
+      // ✅ NEW: Translation fields
+      translated_text: translatedText,
+      target_language: targetLanguage,
+      translation_status: translationStatus,
+      detected_language: detectedLanguage,
     } = transcriptSegmentValue;
 
     // ✅ Convert milliseconds to seconds, with validation
@@ -248,6 +253,12 @@ const useCallsSupabaseApi = ({ initialPeriodsToLoad = CALL_LIST_SHARDS_PER_DAY *
       sentiment,
       sentimentScore,
       sentimentWeighted,
+      // ✅ NEW: Include translation fields
+      translated_text: translatedText,
+      target_language: targetLanguage,
+      translation_status: translationStatus,
+      detected_language: detectedLanguage,
+      language: detectedLanguage, // Alias for consistency with tokens
     };
   };
 

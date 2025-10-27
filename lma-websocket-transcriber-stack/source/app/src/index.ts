@@ -368,7 +368,8 @@ const onTextMessage = async (
               refreshToken: callMetaData.refreshToken,
               shouldRecordCall: callMetaData.shouldRecordCall,
               samplingRate: callMetaData.samplingRate,
-              channels: callMetaData.channels
+              channels: callMetaData.channels,
+              translation: callMetaData.translation  // ✅ FIX: Pass translation config to Soniox
           },
           audioInputStream: audioInputStream,
           writeRecordingStream: writeRecordingStream,

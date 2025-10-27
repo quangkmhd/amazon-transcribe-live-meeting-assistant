@@ -63,6 +63,15 @@ def get_kb_response(query, userId, isAdminUser, sessionId, tracer: StepTracer = 
         )
     
     try:
+        print(f"\n{'='*80}")
+        print(f"🚀 [DEBUG] KB QUERY REQUEST")
+        print(f"{'='*80}")
+        print(f"Query: {query}")
+        print(f"User: {userId}")
+        print(f"Admin: {isAdminUser}")
+        print(f"Session: {sessionId}")
+        print(f"{'='*80}\n")
+        
         # Use RAGQueryEngine for retrieval
         if tracer:
             tracer.add_checkpoint("Initializing RAG Query Engine")
@@ -84,13 +93,24 @@ def get_kb_response(query, userId, isAdminUser, sessionId, tracer: StepTracer = 
             meeting_id=None,  # Search across all meetings
             include_documents=True,
             include_transcripts=True,
-            doc_match_count=5,
-            transcript_match_count=3
+            include_knowledge_graph=True,  # NEW: Enable Knowledge Graph
+            doc_match_count=10,  # Increased from 5 to 10 for better coverage
+            transcript_match_count=5,   # Increased from 3 to 5
+            graph_entity_count=5  # NEW: Top 5 entities from graph
         )
         
         # Build prompt for Gemini to generate answer based on context
         context = rag_result.get('context', '')
         source_count = len(rag_result.get('sources', []))
+        entity_count = rag_result.get('entity_count', 0)
+        has_graph = rag_result.get('has_graph', False)
+        
+        print(f"\n📦 [DEBUG] CONTEXT ASSEMBLY RESULT:")
+        print(f"  - Context length: {len(context)} chars")
+        print(f"  - Source count: {source_count}")
+        print(f"  - Entity count: {entity_count}")
+        print(f"  - Has graph: {has_graph}")
+        print(f"  - Has context: {bool(context)}\n")
         
         lma_rag_logger.info("Context retrieved", context_length=len(context), source_count=source_count)
         
@@ -110,14 +130,123 @@ def get_kb_response(query, userId, isAdminUser, sessionId, tracer: StepTracer = 
         if tracer:
             tracer.add_checkpoint("Building prompt for Gemini")
         
-        answer_prompt = f"""Based on the following context from the knowledge base, please answer the user's question.
+        # Build RAGFlow-style prompt for better RAG responses
+        # Format context as Document Chunks JSON for structured retrieval
+        document_chunks_json = []
+        for idx, source in enumerate(rag_result.get('sources', []), 1):
+            document_chunks_json.append({
+                "chunk_id": f"DC{idx}",
+                "document_id": source.get('document_id', 'unknown'),
+                "content": source.get('excerpt', ''),
+                "relevance_score": source.get('relevance_score', source.get('similarity_score', 0))
+            })
+        
+        content_data = "\n\n".join([
+            f"[DC{idx}] Document: {chunk['document_id']}\nRelevance Score: {chunk['relevance_score']:.2f}\nContent:\n{chunk['content']}"
+            for idx, chunk in enumerate(document_chunks_json, 1)
+        ])
+        
+        # Check if we have graph context
+        has_graph = rag_result.get('has_graph', False)
+        graph_entities = rag_result.get('graph_entities', [])
+        
+        print(f"🧬 [DEBUG] KNOWLEDGE GRAPH STATUS:")
+        print(f"  - Has graph: {has_graph}")
+        print(f"  - Graph entities: {len(graph_entities)}")
+        if graph_entities:
+            for i, entity in enumerate(graph_entities[:3]):
+                print(f"  - Entity {i+1}: {entity.get('entity_name')} ({entity.get('entity_type')})")
+        print("")
+        
+        # Format Knowledge Graph context if available
+        graph_context = ""
+        if has_graph and graph_entities:
+            graph_parts = []
+            for entity in graph_entities:
+                entity_text = f"[KG] {entity['entity_name']} ({entity['entity_type']}): {entity['description']}"
+                graph_parts.append(entity_text)
+            graph_context = "\n\n".join(graph_parts)
+        
+        # RAGFlow-style prompt with KG+DC support (from graphrag/light/graph_prompt.py line 199-237)
+        # Use full `rag_response` template if graph available, else `naive_rag_response`
+        if has_graph:
+            answer_prompt = f"""---Role---
 
-Context:
-{context}
+You are a helpful assistant responding to user query about Knowledge Graph and Document Chunks provided in JSON format below.
 
-User Question: {query}
+---Goal---
 
-Please provide a helpful, accurate response based solely on the context above. If the context doesn't contain enough information to answer the question, say so."""
+Generate a concise response based on Knowledge Base and follow Response Rules, considering both current query and the conversation history if provided. Summarize all information in the provided Knowledge Base, and incorporating general knowledge relevant to the Knowledge Base. Do not include information not provided by Knowledge Base.
+
+---Conversation History---
+(Previous conversation context if any)
+
+---Knowledge Graph and Document Chunks---
+## Knowledge Graph (KG)
+{graph_context}
+
+## Document Chunks (DC)
+{content_data}
+
+---RESPONSE GUIDELINES---
+**1. Content & Adherence:**
+- Strictly adhere to the provided context from the Knowledge Base. Do not invent, assume, or include any information not present in the source data.
+- If the answer cannot be found in the provided context, state that you do not have enough information to answer.
+- Ensure the response maintains continuity with the conversation history.
+- Prioritize Knowledge Graph for structured information (rules, sequences, relationships)
+- Use Document Chunks for detailed context and examples
+
+**2. Formatting & Language:**
+- Format the response using markdown with appropriate section headings.
+- The response language must match the user's question language.
+- Target format and length: Detailed and comprehensive answer
+
+**3. Citations / References:**
+- At the end of the response, under a "References" section, cite a maximum of 5 most relevant sources used.
+- Use the following formats for citations:
+  - For Knowledge Graph Entity: `[KG] <entity_name>`
+  - For Knowledge Graph Relationship: `[KG] <entity1_name> - <entity2_name>`
+  - For Document Chunk: `[DC] <file_path_or_document_name>`
+
+---USER CONTEXT---
+- User Query: {query}
+
+Response:"""
+        else:
+            # Fallback to naive_rag_response (DC only)
+            answer_prompt = f"""---Role---
+
+You are a helpful assistant responding to user query about Document Chunks provided in JSON format below.
+
+---Goal---
+
+Generate a concise response based on Document Chunks and follow Response Rules, considering both the conversation history and the current query. Summarize all information in the provided Document Chunks, and incorporating general knowledge relevant to the Document Chunks. Do not include information not provided by Document Chunks.
+
+---Conversation History---
+(Previous conversation context if any)
+
+---Document Chunks(DC)---
+{content_data}
+
+---RESPONSE GUIDELINES---
+**1. Content & Adherence:**
+- Strictly adhere to the provided context from the Knowledge Base. Do not invent, assume, or include any information not present in the source data.
+- If the answer cannot be found in the provided context, state that you do not have enough information to answer.
+- Ensure the response maintains continuity with the conversation history.
+
+**2. Formatting & Language:**
+- Format the response using markdown with appropriate section headings.
+- The response language must match the user's question language.
+- Target format and length: Detailed and comprehensive answer
+
+**3. Citations / References:**
+- At the end of the response, under a "References" section, cite a maximum of 5 most relevant sources used.
+- Use the following formats for citations: `[DC] <file_path_or_document_name>`
+
+---USER CONTEXT---
+- User Query: {query}
+
+Response:"""
         
         lma_rag_logger.debug("Prompt constructed", prompt_length=len(answer_prompt))
         
@@ -125,7 +254,16 @@ Please provide a helpful, accurate response based solely on the context above. I
         if tracer:
             tracer.add_checkpoint("Calling Gemini API for answer generation")
         
+        print(f"🤖 [DEBUG] CALLING GEMINI:")
+        print(f"  - Prompt length: {len(answer_prompt)} chars")
+        print(f"  - Using prompt type: {'KG+DC' if has_graph else 'DC only'}")
+        print(f"  - Model: gemini-2.0-flash-exp\n")
+        
         answer = generate_gemini_response_non_streaming(answer_prompt, get_meeting_assistant_prompt())
+        
+        print(f"🤖 [DEBUG] GEMINI RESPONSE:")
+        print(f"  - Answer length: {len(answer)} chars")
+        print(f"  - Preview: {answer[:200]}...\n")
         
         lma_rag_logger.info("Answer generated", answer_length=len(answer))
         

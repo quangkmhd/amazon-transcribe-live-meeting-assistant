@@ -64,8 +64,8 @@ export const startSonioxTranscription = async (
         // Determine actual channel count from metadata or default to 2 (stereo)
         const actualChannels = callMetaData.channels || 2;
         
-        // Send start request with speaker diarization
-        const startRequest = {
+        // Send start request with speaker diarization and optional translation
+        const startRequest: any = {
             api_key: SONIOX_API_KEY,
             audio_format: 'pcm_s16le',
             sample_rate: callMetaData.samplingRate,
@@ -76,6 +76,14 @@ export const startSonioxTranscription = async (
             enable_language_identification: true, // ✅ Auto-detect language per token
             language_hints: ['en', 'vi'],
         };
+
+        // ✅ NEW: Add translation config if provided by client
+        if (callMetaData.translation) {
+            startRequest.translation = callMetaData.translation;
+            server.log.info(
+                `[SONIOX]: [${callMetaData.callId}] - Translation enabled: ${JSON.stringify(callMetaData.translation)}`
+            );
+        }
 
         server.log.info(
             `[SONIOX]: [${callMetaData.callId}] - Starting transcription with ${actualChannels} channel(s) at ${callMetaData.samplingRate}Hz`
@@ -122,6 +130,19 @@ export const startSonioxTranscription = async (
                 finished: result.finished,
                 error: result.error_code
             });
+            
+            // 🌐 DEBUG: Check for translation tokens
+            if (result.tokens && result.tokens.length > 0) {
+                const translationTokens = result.tokens.filter((t: any) => t.translation_status === 'translation');
+                if (translationTokens.length > 0) {
+                    console.log('🌐 [TRANSLATION FROM SONIOX]', {
+                        totalTokens: result.tokens.length,
+                        translationCount: translationTokens.length,
+                        sampleOriginal: result.tokens.find((t: any) => t.translation_status !== 'translation'),
+                        sampleTranslation: translationTokens[0]
+                    });
+                }
+            }
 
             logTranscriptDebug(callMetaData.callId, '1-SONIOX_RAW_RESPONSE', {
                 raw_result: result,
@@ -148,7 +169,10 @@ export const startSonioxTranscription = async (
                         is_final: t.is_final,
                         start_ms: t.start_ms,
                         end_ms: t.end_ms,
-                        confidence: t.confidence
+                        confidence: t.confidence,
+                        // ✅ NEW: Translation fields from Soniox
+                        translation_status: t.translation_status,  // "translation" for translated tokens, undefined for original
+                        language: t.language,                      // Auto-detected language code (en, vi, es, etc.)
                     }))
                 };
                 
@@ -206,8 +230,19 @@ export const startSonioxTranscription = async (
                                 speakerNumber
                             );
                             
+                            // ✅ SONIOX PATTERN: Only save ORIGINAL tokens to database
+                            // Translated tokens are broadcast to frontend but NOT saved to DB
+                            const originalTokens = tokens.filter((t: any) => t.translation_status !== 'translation');
+                            const translatedTokens = tokens.filter((t: any) => t.translation_status === 'translation');
+                            
+                            // Skip if no original tokens (pure translation group - shouldn't happen but safety check)
+                            if (originalTokens.length === 0) {
+                                console.log(`⚠️ [SONIOX] Skipping pure translation token group for speaker ${speakerNumber}`);
+                                continue;
+                            }
+                            
                             // ✅ Clean transcript: remove <end> tags and other special markers
-                            const finalText = tokens
+                            const finalText = originalTokens
                                 .map((t: any) => t.text)
                                 .join('')
                                 .replace(/<end>/g, '')
@@ -217,18 +252,18 @@ export const startSonioxTranscription = async (
                                 callMetaData.callId,
                                 finalText,
                                 speakerName || `Speaker ${speakerNumber}`,
-                                tokens[0].confidence
+                                originalTokens[0].confidence
                             );
 
-                            // ✅ Calculate end_time safely: use last token's end_ms if valid, otherwise estimate
-                            const lastToken = tokens[tokens.length - 1];
-                            const firstToken = tokens[0];
+                            // ✅ Calculate end_time safely from ORIGINAL tokens
+                            const lastToken = originalTokens[originalTokens.length - 1];
+                            const firstToken = originalTokens[0];
                             let endTime = lastToken.end_ms;
                             
                             // If end_ms is invalid, calculate from all tokens or estimate
                             if (!endTime || endTime <= firstToken.start_ms) {
-                                // Try to find the maximum end_ms from all tokens
-                                const validEndTimes = tokens
+                                // Try to find the maximum end_ms from all original tokens
+                                const validEndTimes = originalTokens
                                     .map((t: any) => t.end_ms)
                                     .filter((e: number) => e && e > firstToken.start_ms);
                                 
@@ -236,15 +271,18 @@ export const startSonioxTranscription = async (
                                     endTime = Math.max(...validEndTimes);
                                 } else {
                                     // Fallback: estimate duration (avg 0.5s per token)
-                                    const estimatedDuration = tokens.length * 500; // 500ms per token
+                                    const estimatedDuration = originalTokens.length * 500; // 500ms per token
                                     endTime = firstToken.start_ms + estimatedDuration;
                                 }
                                 
                                 console.log(
-                                    `⚠️ [SONIOX BACKEND] Token end_ms invalid, using calculated endTime: ${endTime}ms (from ${tokens.length} tokens)`
+                                    `⚠️ [SONIOX BACKEND] Token end_ms invalid, using calculated endTime: ${endTime}ms (from ${originalTokens.length} original tokens)`
                                 );
                             }
 
+                            const detectedLanguage = firstToken.language;
+                            
+                            // ✅ ONLY save original transcript to database (like Soniox examples)
                             const transcriptData = {
                                 meeting_id: callMetaData.callId,
                                 transcript: finalText,
@@ -254,6 +292,9 @@ export const startSonioxTranscription = async (
                                 start_time: firstToken.start_ms,
                                 end_time: endTime,
                                 is_final: true,
+                                language: detectedLanguage,  // Auto-detected language
+                                // ✅ Do NOT save translation_status or translated_text to DB
+                                // Translation tokens are only broadcast via WebSocket for real-time display
                             };
 
                             logTranscriptDebug(
@@ -282,7 +323,19 @@ export const startSonioxTranscription = async (
                                 `[SONIOX]: [${callMetaData.callId}] - Saved transcript for speaker ${speakerNumber}`
                             );
                             
-                            // ✅ FORWARD FINAL transcript to browser (with validated times in milliseconds)
+                            // Log if we also have translated tokens (for debugging)
+                            if (translatedTokens.length > 0) {
+                                const translatedText = translatedTokens
+                                    .map((t: any) => t.text)
+                                    .join('')
+                                    .replace(/<end>/g, '')
+                                    .replace(/<\/end>/g, '');
+                                console.log(
+                                    `🌐 [TRANSLATION] Speaker ${speakerNumber}: "${finalText}" → "${translatedText}" (${translatedTokens.length} tokens)`
+                                );
+                            }
+                            
+                            // ✅ FORWARD FINAL transcript to browser (without translation - that's in TOKENS)
                             if (socketCallMap.clientWs && socketCallMap.clientWs.readyState === 1) {
                                 const finalTranscript = {
                                     event: 'TRANSCRIPT',
@@ -295,6 +348,7 @@ export const startSonioxTranscription = async (
                                     end_time: transcriptData.end_time / 1000, // Convert ms → seconds for frontend
                                     is_partial: false,
                                     is_final: true,
+                                    language: transcriptData.language,  // Auto-detected language only
                                 };
                                 socketCallMap.clientWs.send(JSON.stringify(finalTranscript));
                                 server.log.debug(

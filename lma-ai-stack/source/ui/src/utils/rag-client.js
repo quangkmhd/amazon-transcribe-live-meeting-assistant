@@ -12,11 +12,60 @@ import { supabase } from './supabase-client';
 import { checkQuotaAvailable, formatBytes } from './storage-quota';
 
 /**
+ * Poll document processing status
+ * @param {string} documentId - Document ID to check
+ * @param {number} maxWaitMs - Maximum time to wait (default: 5 minutes)
+ * @param {number} pollIntervalMs - Polling interval (default: 2 seconds)
+ * @returns {Promise<Object>} Final status
+ */
+async function pollDocumentStatus(documentId, maxWaitMs = 300000, pollIntervalMs = 2000) {
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWaitMs) {
+    const { data, error } = await supabase
+      .from('knowledge_documents')
+      .select('processing_status, chunk_count, metadata')
+      .eq('document_id', documentId)
+      .single();
+    
+    if (error) {
+      throw new Error(`Failed to check status: ${error.message}`);
+    }
+    
+    const status = data.processing_status;
+    const metadata = data.metadata || {};
+    
+    console.log(`[POLL] Status: ${status}, Progress: ${metadata.progress_percent || 0}%`);
+    
+    // Check if completed
+    if (status === 'completed') {
+      return {
+        success: true,
+        status: 'completed',
+        chunks: data.chunk_count,
+        metadata,
+      };
+    }
+    
+    // Check if failed
+    if (status === 'failed') {
+      throw new Error(`Processing failed: ${metadata.error || 'Unknown error'}`);
+    }
+    
+    // Still processing - wait and try again
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+  
+  throw new Error('Processing timeout - document may still be processing in background');
+}
+
+/**
  * Upload a knowledge document
  * @param {File} file - File to upload
+ * @param {Function} onProgress - Optional progress callback (percent, message)
  * @returns {Promise<Object>} Upload result
  */
-export async function uploadKnowledgeDocument(file) {
+export async function uploadKnowledgeDocument(file, onProgress = null) {
   try {
     // Get current user
     const {
@@ -32,6 +81,7 @@ export async function uploadKnowledgeDocument(file) {
     const documentId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Check storage quota before uploading (chunks will count toward quota)
+    onProgress?.(5, 'Checking storage quota...');
     const quotaCheck = await checkQuotaAvailable(ownerEmail, file.size);
     if (!quotaCheck.isAvailable) {
       const currentUsageFormatted = formatBytes(quotaCheck.currentUsage);
@@ -49,6 +99,7 @@ export async function uploadKnowledgeDocument(file) {
     }
 
     // Read file as base64
+    onProgress?.(10, 'Reading file...');
     console.log('Reading file...');
     const fileContent = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -62,6 +113,7 @@ export async function uploadKnowledgeDocument(file) {
     });
 
     // Send file content directly to Edge Function
+    onProgress?.(20, 'Uploading to server...');
     console.log('Processing document...');
     const {
       data: { session },
@@ -88,10 +140,33 @@ export async function uploadKnowledgeDocument(file) {
 
     const result = await response.json();
 
+    // Handle 202 Accepted - processing in background
+    if (response.status === 202) {
+      console.log('Document accepted for processing:', result);
+      onProgress?.(30, 'Processing document in background...');
+      
+      // Poll for completion
+      const finalStatus = await pollDocumentStatus(documentId, 300000, 2000);
+      
+      onProgress?.(100, 'Processing complete!');
+      
+      return {
+        success: true,
+        document_id: documentId,
+        filename: fileName,
+        chunks: finalStatus.chunks,
+        processing_time_ms: finalStatus.metadata?.processing_time_ms || 0,
+        status: 'completed',
+        message: 'Document processed successfully.',
+      };
+    }
+
+    // Handle immediate response (200 OK - small files)
     if (!response.ok || !result.success) {
       throw new Error(result.error || 'Document processing failed');
     }
 
+    onProgress?.(100, 'Processing complete!');
     console.log('Document processed successfully:', result);
 
     return {

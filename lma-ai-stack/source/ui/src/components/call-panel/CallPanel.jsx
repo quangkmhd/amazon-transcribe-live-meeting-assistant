@@ -354,8 +354,11 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
 
 // ✅ End of commented out TranscriptSegment - replaced by TokenBlock
 /**
- * ✅ SONIOX PATTERN: Group tokens into blocks by speaker (simplified)
- * This follows the exact pattern from Soniox React Native example (renderer.tsx:18-43)
+ * ✅ SONIOX PATTERN: Group tokens into blocks by speaker ONLY
+ * For inline translation (original + translated in same block), we DON'T group by language
+ * We'll separate original vs translated INSIDE TokenBlock render
+ * 
+ * IMPORTANT: Translated tokens don't have start_ms/end_ms, so we only use ORIGINAL tokens for timestamps!
  */
 const groupTokensIntoBlocks = (tokens, speakerIdentities) => {
   if (!tokens.length) return [];
@@ -366,6 +369,7 @@ const groupTokensIntoBlocks = (tokens, speakerIdentities) => {
   tokens.forEach((token, idx) => {
     const speaker = token.speaker || '1';
     const speakerNumber = token.speaker_number || speaker;
+    const isTranslation = token.translation_status === 'translation';
 
     // Create new block when speaker changes (like Soniox: line 28)
     if (!currentBlock || currentBlock.speaker_number !== speakerNumber) {
@@ -373,23 +377,43 @@ const groupTokensIntoBlocks = (tokens, speakerIdentities) => {
         blocks.push(currentBlock);
       }
 
+      // ✅ Only use ORIGINAL tokens for timestamps (translated tokens have no start_ms/end_ms)
+      const hasTimestamp = token.start_ms != null && !isTranslation;
+
       currentBlock = {
         id: `block-${idx}-${speakerNumber}`,
         speaker_number: speakerNumber,
         speaker_name: speakerIdentities?.[speakerNumber]?.name,
         tokens: [token],
-        startTime: token.start_ms / 1000,
-        endTime: token.end_ms && token.end_ms > token.start_ms ? token.end_ms / 1000 : token.start_ms / 1000 + 0.5,
+        // Only set timestamps from original tokens; initialize as null to avoid sticky 0.0s
+        startTime: hasTimestamp ? token.start_ms / 1000 : null,
+        endTime: hasTimestamp && token.end_ms && token.end_ms > token.start_ms
+          ? token.end_ms / 1000
+          : hasTimestamp
+            ? token.start_ms / 1000 + 0.5
+            : null,
         channel: token.channel || (speakerNumber === '1' ? 'AGENT' : 'CALLER'),
       };
     } else {
       // Same speaker - append token to current block (like Soniox: line 37)
       currentBlock.tokens.push(token);
-      // Update endTime to latest token's end
-      if (token.end_ms && token.end_ms > token.start_ms) {
-        currentBlock.endTime = Math.max(currentBlock.endTime, token.end_ms / 1000);
-      } else {
-        currentBlock.endTime = Math.max(currentBlock.endTime, token.start_ms / 1000 + 0.5);
+      
+      // ✅ Only update endTime from ORIGINAL tokens (skip translated tokens)
+      if (!isTranslation && token.start_ms != null) {
+        const tokenStart = token.start_ms / 1000;
+        const tokenEnd = token.end_ms && token.end_ms > token.start_ms
+          ? token.end_ms / 1000
+          : token.start_ms / 1000 + 0.5;
+
+        // Initialize or update start time
+        if (currentBlock.startTime == null || tokenStart < currentBlock.startTime) {
+          currentBlock.startTime = tokenStart;
+        }
+
+        // Initialize or update end time
+        if (currentBlock.endTime == null || tokenEnd > currentBlock.endTime) {
+          currentBlock.endTime = tokenEnd;
+        }
       }
     }
   });
@@ -399,12 +423,14 @@ const groupTokensIntoBlocks = (tokens, speakerIdentities) => {
     blocks.push(currentBlock);
   }
 
+  console.log('🔍 [groupTokensIntoBlocks] Created', blocks.length, 'blocks from', tokens.length, 'tokens');
+
   return blocks;
 };
 
 /**
- * ✅ SONIOX PATTERN: Render a token block (replaces complex TranscriptSegment)
- * Simple component that shows speaker + time + tokens
+ * ✅ SONIOX PATTERN WITH TRANSLATION: Render a token block with inline translation
+ * Shows: Speaker + Time + Original Text + Translated Text (Style 2 - Labeled)
  */
 const TokenBlock = ({ block, onSpeakerClick }) => {
   const cleanSpeakerNumber =
@@ -415,6 +441,58 @@ const TokenBlock = ({ block, onSpeakerClick }) => {
     : `Speaker ${cleanSpeakerNumber}`;
 
   const isSpeakerClickable = block.speaker_number != null;
+
+  // ✅ DEBUG: Log ALL tokens in this block
+  console.log('🔍 [TokenBlock DEBUG] Block ID:', block.id);
+  console.log('  Total tokens:', block.tokens.length);
+  console.log(
+    '  First 3 tokens:',
+    block.tokens.slice(0, 3).map((t) => ({
+      text: t.text?.substring(0, 10),
+      translation_status: t.translation_status,
+      language: t.language,
+      is_final: t.is_final,
+    })),
+  );
+
+  // ✅ NEW: Separate tokens into original and translated
+  const originalTokens = block.tokens.filter((t) => t.translation_status !== 'translation');
+  const translatedTokens = block.tokens.filter((t) => t.translation_status === 'translation');
+
+  // ✅ DEBUG: Log filtering results
+  console.log('🎨 [RENDER TokenBlock] Block:', block.id);
+  console.log('  → Total tokens:', block.tokens.length);
+  console.log('  → Original tokens:', originalTokens.length);
+  console.log('  → Translated tokens:', translatedTokens.length);
+  if (translatedTokens.length > 0) {
+    console.log('  ✨ TRANSLATION WILL RENDER!', {
+      targetLang: translatedTokens[0]?.language,
+      sample: translatedTokens.slice(0, 2).map((t) => ({
+        text: t.text?.substring(0, 15),
+        status: t.translation_status,
+      })),
+    });
+  }
+
+  // ✅ Get stable language labels using majority vote to avoid flicker
+  const getDominantLanguage = (tokens) => {
+    const counts = {};
+    tokens.forEach((t) => {
+      const lang = t.language;
+      if (!lang) return;
+      counts[lang] = (counts[lang] || 0) + 1;
+    });
+    const langs = Object.keys(counts);
+    if (langs.length === 0) return undefined;
+    langs.sort((a, b) => counts[b] - counts[a]);
+    return langs[0];
+  };
+
+  const originalLang = getDominantLanguage(originalTokens);
+  const translatedLang = getDominantLanguage(translatedTokens);
+
+  const detectedLang = (originalLang || 'AUTO').toUpperCase();
+  const targetLang = translatedLang ? translatedLang.toUpperCase() : undefined;
 
   return (
     <Grid className="transcript-segment" disableGutters gridDefinition={[{ colspan: 1 }, { colspan: 10 }]}>
@@ -445,23 +523,57 @@ const TokenBlock = ({ block, onSpeakerClick }) => {
             )}
           </TextContent>
           <TextContent>
-            {`${getTimestampFromSeconds(block.startTime)} - ${getTimestampFromSeconds(block.endTime)}`}
+            {block.startTime != null && block.endTime != null
+              ? `${getTimestampFromSeconds(block.startTime)} - ${getTimestampFromSeconds(block.endTime)}`
+              : ''}
           </TextContent>
         </SpaceBetween>
-        {/* Render all tokens in this block */}
-        <div style={{ display: 'inline' }}>
-          {block.tokens.map((token) => (
-            <span
-              key={`${block.id}-${token.start_ms}-${token.text.substring(0, 10)}`}
-              style={{
-                color: token.is_final ? '#000000' : '#888888',
-                fontWeight: token.is_final ? 'normal' : '300',
-              }}
-            >
-              {token.text}
+
+        {/* ✅ Style 2 - Labeled: Original Transcript */}
+        {originalTokens.length > 0 && (
+          <div style={{ background: '#f9f9f9', padding: '8px', borderRadius: '4px', marginBottom: '4px' }}>
+            <span style={{ color: '#999', fontSize: '11px', fontWeight: '600', marginRight: '8px' }}>
+              {detectedLang}:
             </span>
-          ))}
-        </div>
+            <span style={{ display: 'inline' }}>
+              {originalTokens.map((token, idx) => (
+                <span
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={`orig-${block.id}-${idx}`}
+                  style={{
+                    color: token.is_final ? '#000000' : '#888888',
+                    fontWeight: token.is_final ? 'normal' : '300',
+                  }}
+                >
+                  {token.text}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
+
+        {/* ✅ Style 2 - Labeled: Translated Transcript */}
+        {translatedTokens.length > 0 && (
+          <div style={{ background: '#e6f7ff', padding: '8px', borderRadius: '4px', paddingLeft: '12px' }}>
+            <span style={{ color: '#0066cc', fontSize: '11px', fontWeight: '600', marginRight: '8px' }}>
+              {targetLang}:
+            </span>
+            <span style={{ display: 'inline' }}>
+              {translatedTokens.map((token, idx) => (
+                <span
+                  // eslint-disable-next-line react/no-array-index-key
+                  key={`trans-${block.id}-${idx}`}
+                  style={{
+                    color: token.is_final ? '#003d99' : '#6699cc',
+                    fontWeight: token.is_final ? 'normal' : '300',
+                  }}
+                >
+                  {token.text}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
       </SpaceBetween>
     </Grid>
   );
@@ -557,6 +669,34 @@ const CallInProgressTranscript = ({
         const tokenTexts = message.tokens.map((t) => `${t.text}${t.is_final ? '✓' : '?'}`).join(' ');
         console.log(`📝 [TOKENS] Received ${message.tokens.length} tokens:`, tokenTexts);
 
+        // ✅ DEBUG: Check if tokens have translation fields
+        const hasTranslation = message.tokens.some((t) => t.translation_status === 'translation');
+        if (hasTranslation) {
+          const originals = message.tokens.filter((t) => t.translation_status !== 'translation');
+          const translations = message.tokens.filter((t) => t.translation_status === 'translation');
+          console.log('🌐 [TRANSLATION DETECTED!]');
+          console.log(
+            `  → Original tokens: ${originals.length}`,
+            originals.slice(0, 2).map((t) => ({ text: t.text, lang: t.language })),
+          );
+          console.log(
+            `  → Translated tokens: ${translations.length}`,
+            translations.slice(0, 2).map((t) => ({ text: t.text, lang: t.language })),
+          );
+        }
+
+        console.log('🔍 [TOKENS DEBUG] First 3 tokens full structure:');
+        message.tokens.slice(0, 3).forEach((t, i) => {
+          console.log(`  Token ${i}:`, {
+            text: t.text?.substring(0, 20),
+            translation_status: t.translation_status,
+            typeof_status: typeof t.translation_status,
+            language: t.language,
+            is_final: t.is_final,
+            speaker: t.speaker,
+          });
+        });
+
         const newFinalTokens = [];
         const newNonFinalTokens = [];
 
@@ -631,9 +771,9 @@ const CallInProgressTranscript = ({
     console.log('  Final tokens:', finalTokens.length);
     console.log('  Non-final tokens:', nonFinalTokens.length);
 
-    // ✅ STEP 1: Combine live tokens (like Soniox: [...finalTokens, ...nonFinalTokens])
+    // ✅ STEP 1: Combine live tokens (keep Soniox order: original → translation)
+    // DO NOT sort here to avoid breaking original→translation adjacency
     const allLiveTokens = [...finalTokens, ...nonFinalTokens];
-    allLiveTokens.sort((a, b) => a.start_ms - b.start_ms);
 
     // ✅ STEP 2: Get database segments and convert to token format
     const databaseTokens = transcriptChannels
@@ -652,35 +792,53 @@ const CallInProgressTranscript = ({
         end_ms: seg.endTime * 1000,
         is_final: !seg.isPartial,
         channel: seg.channel,
+        language: seg.language || seg.detected_language || 'en',  // ✅ Add language from DB
+        translation_status: undefined,  // ✅ FIX: Use undefined (not null) to match Soniox original tokens
         _isDbSegment: true, // Flag to identify database segments
         _originalSegment: seg, // Keep original for sentiment/metadata
       }));
 
     console.log('  Database tokens (converted from segments):', databaseTokens.length);
 
-    // ✅ STEP 3: Merge live + database tokens with deduplication
+    // ✅ STEP 3: Stable-merge DB tokens by time into live tokens (preserve live adjacency)
     const allTokens = [];
     const seenKeys = new Set();
+    let dbIdx = 0;
+    const db = databaseTokens; // already sorted by startTime
 
-    // Add database tokens first
-    databaseTokens.forEach((token) => {
-      const key = `${token.speaker}-${token.start_ms}`;
+    // Track last original token time so translations (no time) can anchor to it
+    let lastOriginalStartMs = -Infinity;
+    const getEffectiveTime = (t) => {
+      if (t.start_ms != null) {
+        lastOriginalStartMs = t.start_ms;
+        return t.start_ms;
+      }
+      // For translated tokens (no timestamps), anchor to last original
+      return lastOriginalStartMs;
+    };
+
+    const pushIfNew = (t) => {
+      const key = `${t.speaker || '1'}-${t.start_ms}-${t.text}`;
       if (!seenKeys.has(key)) {
-        allTokens.push(token);
+        allTokens.push(t);
         seenKeys.add(key);
       }
-    });
+    };
 
-    // Add live tokens (skip if overlaps with database)
-    allLiveTokens.forEach((token) => {
-      const key = `${token.speaker || '1'}-${token.start_ms}`;
-      if (!seenKeys.has(key)) {
-        allTokens.push(token);
+    allLiveTokens.forEach((live) => {
+      const liveTime = getEffectiveTime(live);
+      while (dbIdx < db.length && db[dbIdx].start_ms <= liveTime) {
+        pushIfNew(db[dbIdx]);
+        dbIdx += 1;
       }
+      pushIfNew(live);
     });
 
-    // Sort all tokens by time
-    allTokens.sort((a, b) => a.start_ms - b.start_ms);
+    // Append remaining DB tokens
+    while (dbIdx < db.length) {
+      pushIfNew(db[dbIdx]);
+      dbIdx += 1;
+    }
 
     console.log(
       `  Total tokens to render: ${allTokens.length} (${databaseTokens.length} DB + ${allLiveTokens.length} live)`,

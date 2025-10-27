@@ -17,6 +17,7 @@ import {
   Grid,
   Box,
   Link,
+  Select,
 } from '@awsui/components-react';
 import '@awsui/global-styles/index.css';
 import useWebSocket from 'react-use-websocket';
@@ -26,6 +27,7 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { getTimestampStr } from '../common/utilities';
 import useStorageQuota from '../../hooks/use-storage-quota';
+import { TRANSLATION_LANGUAGES, getStoredTargetLanguage, saveTargetLanguage } from '../../config/languages';
 
 let SOURCE_SAMPLING_RATE;
 const DEFAULT_BLANK_FIELD_MSG = 'This will be set back to the default value if left blank.';
@@ -46,6 +48,12 @@ const StreamAudio = () => {
 
   // Storage quota hook
   const { isOverQuota, refresh: refreshQuota } = useStorageQuota(userEmail);
+
+  // ✅ NEW: Target language for translation
+  const [targetLanguage, setTargetLanguage] = useState(() => {
+    const stored = getStoredTargetLanguage();
+    return TRANSLATION_LANGUAGES.find((lang) => lang.code === stored) || TRANSLATION_LANGUAGES[0];
+  });
 
   const [meetingTopic, setMeetingTopic] = useState('Stream Audio');
   const [callMetaData, setCallMetaData] = useState({
@@ -250,6 +258,15 @@ const StreamAudio = () => {
       recordingCallMetaData.channels = 2; // Stereo: channel 0 = display audio, channel 1 = mic
       recordingCallMetaData.callEvent = 'START';
 
+      // ✅ NEW: Add translation config if target language is selected
+      if (targetLanguage.value !== 'none') {
+        recordingCallMetaData.translation = {
+          type: 'one_way',
+          target_language: targetLanguage.value,
+        };
+        console.log(`🌐 [TRANSLATION] Enabled: ${targetLanguage.label} (${targetLanguage.value})`);
+      }
+
       // eslint-disable-next-line prettier/prettier
       console.log(
         `DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`,
@@ -451,6 +468,27 @@ const StreamAudio = () => {
                     iconName={micMuted ? 'microphone-off' : 'microphone'}
                   />
                 </Grid>
+              </FormField>
+
+              {/* ✅ NEW: Target Language for Real-time Translation */}
+              <FormField
+                label="🌐 Target Language (Translation)"
+                stretch
+                description="Translate transcripts to this language in real-time (powered by Soniox)"
+              >
+                <Select
+                  selectedOption={targetLanguage}
+                  onChange={({ detail }) => {
+                    setTargetLanguage(detail.selectedOption);
+                    saveTargetLanguage(detail.selectedOption.value);
+                  }}
+                  options={TRANSLATION_LANGUAGES}
+                  disabled={recording}
+                  placeholder="Select target language"
+                  selectedAriaLabel="Selected language"
+                  filteringType="auto"
+                  expandToViewport
+                />
               </FormField>
             </ColumnLayout>
 

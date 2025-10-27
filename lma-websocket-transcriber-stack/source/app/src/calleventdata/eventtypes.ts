@@ -78,6 +78,14 @@ export interface ChannelSpeakerData {
     startTimes: number[];
 }
 
+// Translation configuration type (matching Soniox API)
+export type TranslationConfig = {
+    type: 'one_way' | 'two_way';
+    target_language?: string;  // For one_way translation
+    language_a?: string;        // For two_way translation
+    language_b?: string;        // For two_way translation
+};
+
 export type CallMetaData = {
     callId: Uuid,
     fromNumber?: string,
@@ -94,6 +102,7 @@ export type CallMetaData = {
     idToken?: string,
     refreshToken?: string,
     owner_email?: string,
+    translation?: TranslationConfig, // ✅ NEW: Translation configuration
 };
 
 export type SocketCallData = {

@@ -121,6 +121,141 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
 }
 
 /**
+ * Process in background without blocking response
+ */
+async function processInBackground(
+  document_id: string,
+  owner_email: string,
+  file_name: string,
+  file_type: string,
+  file_size: number,
+  text: string,
+  chunks: string[]
+) {
+  try {
+    const startTime = Date.now();
+    
+    // Update status to processing
+    await supabase
+      .from('knowledge_documents')
+      .update({ 
+        processing_status: 'processing',
+        metadata: { 
+          current_step: 'generating_embeddings',
+          total_chunks: chunks.length 
+        }
+      })
+      .eq('document_id', document_id);
+    
+    // Generate embeddings in batches
+    console.log(`[BACKGROUND] Generating embeddings for ${chunks.length} chunks...`);
+    const embeddings: number[][] = [];
+    const BATCH_SIZE = 50; // Smaller batches for large files
+    
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batch = chunks.slice(i, Math.min(i + BATCH_SIZE, chunks.length));
+      const batchEmbeddings = await generateEmbeddings(batch);
+      embeddings.push(...batchEmbeddings);
+      
+      // Update progress
+      const progress = Math.round((embeddings.length / chunks.length) * 100);
+      console.log(`[PROGRESS] ${progress}% (${embeddings.length}/${chunks.length} chunks)`);
+      
+      await supabase
+        .from('knowledge_documents')
+        .update({ 
+          metadata: { 
+            current_step: 'generating_embeddings',
+            progress_percent: progress,
+            chunks_processed: embeddings.length,
+            total_chunks: chunks.length
+          }
+        })
+        .eq('document_id', document_id);
+    }
+    
+    console.log(`[BACKGROUND] Generated ${embeddings.length} embeddings`);
+    
+    // Update status to saving
+    await supabase
+      .from('knowledge_documents')
+      .update({ 
+        metadata: { 
+          current_step: 'saving_chunks',
+          progress_percent: 100 
+        }
+      })
+      .eq('document_id', document_id);
+    
+    // Save chunks in batches (Supabase has row limits)
+    console.log('[BACKGROUND] Saving chunks...');
+    const SAVE_BATCH_SIZE = 1000; // Supabase recommended batch size
+    
+    for (let i = 0; i < chunks.length; i += SAVE_BATCH_SIZE) {
+      const batchChunks = chunks.slice(i, Math.min(i + SAVE_BATCH_SIZE, chunks.length));
+      const batchEmbeddings = embeddings.slice(i, Math.min(i + SAVE_BATCH_SIZE, embeddings.length));
+      
+      const chunkRecords = batchChunks.map((content, index) => ({
+        chunk_id: `${document_id}_chunk_${i + index}`,
+        document_id,
+        owner_email,
+        chunk_index: i + index,
+        content,
+        content_length: content.length,
+        embedding: JSON.stringify(batchEmbeddings[index]),
+        metadata: {
+          chunk_size: content.length,
+          total_chunks: chunks.length
+        }
+      }));
+      
+      const { error: chunksError } = await supabase
+        .from('knowledge_chunks')
+        .insert(chunkRecords);
+      
+      if (chunksError) {
+        throw new Error(`Save chunks batch ${i} failed: ${chunksError.message}`);
+      }
+      
+      console.log(`[PROGRESS] Saved ${Math.min(i + SAVE_BATCH_SIZE, chunks.length)}/${chunks.length} chunks`);
+    }
+    
+    // Update status to completed
+    const processingTime = Date.now() - startTime;
+    await supabase
+      .from('knowledge_documents')
+      .update({ 
+        processing_status: 'completed',
+        chunk_count: chunks.length,
+        metadata: {
+          processing_time_ms: processingTime,
+          text_length: text.length,
+          uploaded_via: 'web_ui_direct',
+          completed_at: new Date().toISOString()
+        }
+      })
+      .eq('document_id', document_id);
+    
+    console.log(`[BACKGROUND] ✅ Completed in ${processingTime}ms`);
+    
+  } catch (error) {
+    console.error('[BACKGROUND ERROR]', error);
+    
+    // Update status to failed
+    await supabase
+      .from('knowledge_documents')
+      .update({ 
+        processing_status: 'failed',
+        metadata: {
+          error: error.message,
+          failed_at: new Date().toISOString()
+        }
+      })
+      .eq('document_id', document_id);
+  }
+}
+
+/**
  * Main handler
  */
 serve(async (req) => {
@@ -144,12 +279,11 @@ serve(async (req) => {
     } = requestData;
     
     console.log(`[PROCESS] Starting: ${file_name} (${document_id})`);
-    const startTime = Date.now();
     
     // Step 1: Parse document from base64
     console.log('[STEP 1] Parsing document...');
     const text = await parseDocument(file_content, file_type, file_name);
-    console.log(`Extracted ${text.length} chars`);
+    console.log(`[STEP 1] Extracted ${text.length} chars`);
     
     if (!text || text.trim().length === 0) {
       throw new Error('No text content extracted');
@@ -158,15 +292,10 @@ serve(async (req) => {
     // Step 2: Chunk text
     console.log('[STEP 2] Chunking...');
     const chunks = chunkText(text);
-    console.log(`Created ${chunks.length} chunks`);
+    console.log(`[STEP 2] Created ${chunks.length} chunks`);
     
-    // Step 3: Generate embeddings
-    console.log('[STEP 3] Generating embeddings...');
-    const embeddings = await generateEmbeddings(chunks);
-    console.log(`Generated ${embeddings.length} embeddings`);
-    
-    // Step 4: Save document metadata
-    console.log('[STEP 4] Saving metadata...');
+    // Step 3: Save document metadata IMMEDIATELY (status = 'pending')
+    console.log('[STEP 3] Saving metadata...');
     const { error: docError } = await supabase
       .from('knowledge_documents')
       .insert({
@@ -175,13 +304,13 @@ serve(async (req) => {
         file_name,
         file_type,
         file_size,
-        storage_path: 'direct_upload',  // No physical storage
-        processing_status: 'completed',
-        chunk_count: chunks.length,
+        storage_path: 'direct_upload',
+        processing_status: 'pending', // Will be updated by background process
+        chunk_count: 0, // Will be updated
         metadata: {
-          processing_time_ms: Date.now() - startTime,
           text_length: text.length,
-          uploaded_via: 'web_ui_direct'
+          uploaded_via: 'web_ui_direct',
+          started_at: new Date().toISOString()
         }
       });
     
@@ -189,34 +318,13 @@ serve(async (req) => {
       throw new Error(`Save metadata failed: ${docError.message}`);
     }
     
-    // Step 5: Save chunks with embeddings
-    console.log('[STEP 5] Saving chunks...');
-    const chunkRecords = chunks.map((content, index) => ({
-      chunk_id: `${document_id}_chunk_${index}`,
-      document_id,
-      owner_email,
-      chunk_index: index,
-      content,
-      content_length: content.length,
-      embedding: embeddings[index],
-      metadata: {
-        chunk_size: content.length,
-        total_chunks: chunks.length
-      }
-    }));
+    // Step 4: Start background processing (don't wait)
+    console.log('[STEP 4] Starting background processing...');
+    processInBackground(document_id, owner_email, file_name, file_type, file_size, text, chunks)
+      .catch(err => console.error('[BACKGROUND FAILED]', err));
     
-    const { error: chunksError } = await supabase
-      .from('knowledge_chunks')
-      .insert(chunkRecords);
-    
-    if (chunksError) {
-      // Rollback: delete document metadata
-      await supabase.from('knowledge_documents').delete().eq('document_id', document_id);
-      throw new Error(`Save chunks failed: ${chunksError.message}`);
-    }
-    
-    const processingTime = Date.now() - startTime;
-    console.log(`[SUCCESS] Processed in ${processingTime}ms - NO FILE STORAGE NEEDED!`);
+    // Return immediately
+    console.log(`[RESPONSE] Returning immediately - processing continues in background`);
     
     return new Response(
       JSON.stringify({
@@ -224,12 +332,12 @@ serve(async (req) => {
         document_id,
         file_name,
         chunks: chunks.length,
-        processing_time_ms: processingTime,
-        message: 'Document processed successfully'
+        status: 'processing',
+        message: 'Document accepted for processing. Check status for progress.'
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200
+        status: 202 // Accepted
       }
     );
     
