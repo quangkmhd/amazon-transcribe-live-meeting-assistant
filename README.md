@@ -1,10 +1,9 @@
 # Amazon Transcribe Live Meeting Assistant
 
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat-square)
-![Test Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen.svg?style=flat-square)
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg?style=flat-square)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Playwright](https://img.shields.io/badge/tested_with-playwright-ff69b4.svg)
+![AWS](https://img.shields.io/badge/AWS-CloudFormation-FF9900?style=flat-square&logo=amazon-aws&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Database-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)
 
 Transform your virtual meetings with real-time transcription and AI-powered insights using Amazon Transcribe. Designed for remote teams, enterprise professionals, and educators who need flawless meeting documentation, it reduces meeting wrap-up time by up to 80% through instant summaries and action items.
 
