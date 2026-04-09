@@ -184,10 +184,14 @@ console.assert(data.length === 0, "RLS Failed! Data leaked.");
 
 ## 📚 Documentation Links
 
-- [AWS Architecture Deep Dive](./architecture/README.md)
-- [Supabase Schema & RLS Policies](./supabase/README.md)
-- [Browser Extension Setup Guide](./lma-browser-extension-stack/README.md)
-- [AI Stack Configuration](./lma-ai-stack/README.md)
+- **[System Architecture](./docs/ARCHITECTURE.md)**  
+  Dive into the core infrastructure powering the live transcription pipeline. This guide reveals the seamless data flow from browser WebSockets to AWS serverless components and Supabase RLS, showcasing how the app scales to handle massive concurrency without breaking a sweat.
+
+- **[API Reference](./docs/API_REFERENCE.md)**  
+  Explore the exhaustive API endpoints and payload structures used by the meeting assistant. Whether you're building custom integrations or debugging AI summary responses, this documentation provides the exact JSON schemas and authentication methods you need.
+
+- **[Configuration Guide](./docs/CONFIGURATION.md)**  
+  Unlock the full potential of your deployment by tuning environment variables and AWS CDK stack parameters. Discover how to effortlessly switch LLM providers, adjust WebSocket timeouts, and lock down your multi-tenant security rules for a production-ready setup.
 
 ## 🤝 Contributing
 
